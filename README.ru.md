@@ -6,10 +6,10 @@
 
 <h1 align="center">PaperFlux Android</h1>
 
-<p align="center"><b>Приватный документный туннель для Android</b><br>Профили · Material 3 · транспорт Yandex Docs</p>
+<p align="center"><b>Экспериментальный Android-клиент для исследования документного транспорта</b></p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/status-research-6957e8?style=flat-square" alt="Исследовательский статус">
+  <img src="https://img.shields.io/badge/status-experimental-6957e8?style=flat-square" alt="Экспериментальный статус">
   <img src="https://img.shields.io/badge/Android-8%2B-3ddc84?style=flat-square&logo=android&logoColor=white" alt="Android 8+">
   <img src="https://img.shields.io/badge/ABI-arm64--v8a-6f42c1?style=flat-square" alt="arm64-v8a">
   <img src="https://img.shields.io/badge/license-GPL--3.0-orange?style=flat-square" alt="GPL-3.0">
@@ -17,11 +17,9 @@
 
 <p align="center"><a href="README.md">English</a> · <b>Русский</b></p>
 
-PaperFlux — Android-клиент, который получает профиль Yandex Docs от пользователя. Добавьте профиль, нажмите подключение, и foreground-сервис сохранит сессию при закрытии интерфейса. В приложении нет заранее заданного сервера или документа.
+PaperFlux Android — экспериментальный клиент для изучения документного сетевого транспорта на устройствах, которыми вы управляете. В нём нет готового сервера, документа, подписки или конфигурации доступа: все параметры добавляет локально человек, проводящий эксперимент.
 
-> Исследовательское ПО. Используйте только документы, серверы и сети, к которым у вас есть доступ.
-
-## Экраны
+## Интерфейс
 
 <div align="center">
   <img src="docs/images/01-home.jpg" width="160" alt="Главный экран PaperFlux">
@@ -29,43 +27,31 @@ PaperFlux — Android-клиент, который получает профил
   <img src="docs/images/03-logs.jpg" width="160" alt="Журнал PaperFlux">
   <img src="docs/images/04-settings.jpg" width="160" alt="Настройки PaperFlux">
 </div>
-<p align="center"><sub>Скриншоты обрезаны без системных строк Android.</sub></p>
+<p align="center"><sub>Экраны приложения без системных строк Android.</sub></p>
 
-## Как это работает
+## Начало работы
 
-Профиль содержит endpoint документа и параметры сессии. Сервис Android создаёт TUN-интерфейс, native worker передаёт кадры через Yandex Engine.IO/WebSocket, а выходная нода открывает соединение назначения со стороны VPS.
+1. Соберите или подготовьте совместимый PaperFlux Server для инфраструктуры, которой вы администрируете.
+2. Установите APK на устройство `arm64-v8a` с Android 8.0 или новее.
+3. Импортируйте собственную конфигурацию и запустите тестовую сессию из приложения.
 
-```text
-Профиль → Android TUN → PaperFlux transport → exit node → Интернет
-```
+Исходный код серверной части находится в [PaperFlux Server](https://github.com/Flofyyk/PaperFlux). Проект основан на [p1neappleXpress/OpenFlux](https://github.com/p1neappleXpress/OpenFlux); PaperFlux Android поддерживается как отдельный клиент.
 
-## Возможности клиента
+## Сборка из исходников
 
-- менеджер профилей: буфер, файл и ручной ввод;
-- зашифрованное локальное хранилище профилей;
-- polling-handshake Yandex Docs с последующим WebSocket upgrade;
-- Android `VpnService` TUN и маршрутизация DNS;
-- foreground-сервис с автоматическим восстановлением;
-- постоянный журнал текущей сессии и счётчики трафика;
-- встроенный native worker для `arm64-v8a`.
-
-Серверная часть находится в репозитории [PaperFlux Server](https://github.com/Flofyyk/PaperFlux). Проект основан на [p1neappleXpress/OpenFlux](https://github.com/p1neappleXpress/OpenFlux), а интерфейс и Android-жизненный цикл PaperFlux поддерживаются отдельно.
-
-## Требования и сборка
-
-- Android 8.0 (API 26) или новее;
-- Android SDK 35 и JDK 17;
-- Android NDK 27.0.12077973+ для пересборки native-библиотеки.
+Нужны Android SDK 35, JDK 17 и Android NDK 27.0.12077973+ для пересборки native-кода.
 
 ```bash
 ./gradlew :app:assembleDebug
 adb install -r app/build/outputs/apk/debug/app-debug.apk
 ```
 
-## Импорт профиля
+## Отказ от ответственности
 
-Поддерживаются URI `paperflux://config` и JSON-файл. Реальный токен, ссылку документа и приватный адрес сервера нельзя добавлять в Git — импортируйте профиль локально.
+PaperFlux — экспериментальное исследовательское ПО, которое предоставляется «как есть», без гарантий доступности, приватности, безопасности, производительности или пригодности для какой-либо цели. Авторы не предоставляют сервис, доступы или готовые конфигурации и не отвечают за настройку и использование программы.
+
+Используйте проект только для обучения, исследований и тестов на собственных либо явно разрешённых системах, документах, серверах и сетях. За соблюдение законов, безопасность конфигурации, работу с данными и весь трафик, созданный вашей установкой, отвечаете вы.
 
 ## Лицензия
 
-Android-клиент следует лицензии проекта OpenFlux. См. [LICENSE](https://github.com/p1neappleXpress/OpenFlux/blob/main/LICENSE) и уведомления о лицензиях в серверном репозитории.
+PaperFlux Android следует лицензии OpenFlux. См. [LICENSE](https://github.com/p1neappleXpress/OpenFlux/blob/main/LICENSE) и уведомления о сторонних лицензиях в серверном репозитории.
