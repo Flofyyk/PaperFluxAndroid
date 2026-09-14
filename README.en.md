@@ -1,5 +1,3 @@
-# PaperFlux Android
-
 <p align="center">
   <img src="docs/images/paperflux-mark.svg" width="112" alt="PaperFlux logo">
 </p>
@@ -28,7 +26,7 @@ To connect, add your profile by importing a configuration from the clipboard or 
   <img src="docs/images/03-logs.jpg" width="160" alt="PaperFlux event log">
   <img src="docs/images/04-settings.jpg" width="160" alt="PaperFlux settings">
 </div>
-<p align="center"><sub>Application screens, cropped without Android system bars.</sub></p>
+<p align="center"><sub>Home · Profiles · Journal · Settings</sub></p>
 
 ## Features
 
@@ -39,17 +37,22 @@ To connect, add your profile by importing a configuration from the clipboard or 
 - Foreground notification with connection state, traffic totals and a disconnect action.
 - Profile secrets stored in encrypted device storage.
 
-## Compatibility and limits
+## Requirements
 
-The packaged client targets Android 8+ on ARM64. It requires a compatible PaperFlux exit node and a valid profile; opening a document alone does not grant server access. The current Android worker uses one document per connection. Multi-document aggregation is not enabled. Network changes and Yandex availability can interrupt a session; this remains an experimental release.
+- Android 8.0 or later.
+- ARM64 processor (`arm64-v8a`).
+- A compatible PaperFlux server and a valid connection profile.
 
 [Download APK releases](https://github.com/Flofyyk/PaperFluxAndroid/releases)
 
-## Getting started
+## Installation and connection
 
-1. Build or obtain a compatible PaperFlux Server for infrastructure you administer.
-2. Install the Android APK on an `arm64-v8a` device running Android 8.0 or later.
-3. Import a configuration that belongs to you, then start a test session from the app.
+1. Download the APK from the [latest release](https://github.com/Flofyyk/PaperFluxAndroid/releases/latest) and install it.
+2. Open Profiles and import a configuration from the clipboard or a file, or enter it manually.
+3. Select a profile and tap the connect button on the home screen.
+4. On first connection, approve the Android VPN permission dialog.
+
+To bypass the VPN for specific apps, select them under Settings → App exclusions and reconnect.
 
 The matching server source is in [PaperFlux Server](https://github.com/Flofyyk/PaperFlux). The project started from [p1neappleXpress/OpenFlux](https://github.com/p1neappleXpress/OpenFlux); PaperFlux Android is maintained as a separate client.
 
