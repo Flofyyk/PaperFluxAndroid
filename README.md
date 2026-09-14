@@ -23,14 +23,12 @@ PaperFlux is a small Android client for a Yandex Docs profile supplied by the us
 
 ## Screens
 
-<p align="center">
-  <img src="docs/images/01-home.jpg" width="220" alt="PaperFlux home">
-  <img src="docs/images/02-profiles.jpg" width="220" alt="PaperFlux profiles">
-  <img src="docs/images/03-logs.jpg" width="220" alt="PaperFlux event log">
-</p>
-<p align="center">
-  <img src="docs/images/04-settings.jpg" width="220" alt="PaperFlux settings">
-</p>
+<div align="center">
+  <img src="docs/images/01-home.jpg" width="160" alt="PaperFlux home">
+  <img src="docs/images/02-profiles.jpg" width="160" alt="PaperFlux profiles">
+  <img src="docs/images/03-logs.jpg" width="160" alt="PaperFlux event log">
+  <img src="docs/images/04-settings.jpg" width="160" alt="PaperFlux settings">
+</div>
 <p align="center"><sub>App screens are cropped without the Android status and navigation bars.</sub></p>
 
 ## How it works

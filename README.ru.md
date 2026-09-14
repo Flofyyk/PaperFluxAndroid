@@ -23,14 +23,12 @@ PaperFlux — Android-клиент, который получает профил
 
 ## Экраны
 
-<p align="center">
-  <img src="docs/images/01-home.jpg" width="220" alt="Главный экран PaperFlux">
-  <img src="docs/images/02-profiles.jpg" width="220" alt="Профили PaperFlux">
-  <img src="docs/images/03-logs.jpg" width="220" alt="Журнал PaperFlux">
-</p>
-<p align="center">
-  <img src="docs/images/04-settings.jpg" width="220" alt="Настройки PaperFlux">
-</p>
+<div align="center">
+  <img src="docs/images/01-home.jpg" width="160" alt="Главный экран PaperFlux">
+  <img src="docs/images/02-profiles.jpg" width="160" alt="Профили PaperFlux">
+  <img src="docs/images/03-logs.jpg" width="160" alt="Журнал PaperFlux">
+  <img src="docs/images/04-settings.jpg" width="160" alt="Настройки PaperFlux">
+</div>
 <p align="center"><sub>Скриншоты обрезаны без системных строк Android.</sub></p>
 
 ## Как это работает
