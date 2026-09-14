@@ -29,6 +29,21 @@ PaperFlux Android is an experimental client for studying document-based network 
 </div>
 <p align="center"><sub>Application screens, cropped without Android system bars.</sub></p>
 
+## Features
+
+- Android VPN service with session traffic counters and a persistent event journal.
+- Profiles with selection, editing and deletion; import from clipboard, file or manual entry.
+- Per-app exclusions: selected applications bypass the VPN. Reconnect after changing the list.
+- Yandex Docs transport with authenticated tunnel readiness checks and reconnection handling.
+- Foreground notification with connection state, traffic totals and a disconnect action.
+- Profile secrets stored in encrypted device storage.
+
+## Compatibility and limits
+
+The packaged client targets Android 8+ on ARM64. It requires a compatible PaperFlux exit node and a valid profile; opening a document alone does not grant server access. The current Android worker uses one document per connection. Multi-document aggregation is not enabled. Network changes and Yandex availability can interrupt a session; this remains an experimental release.
+
+[Download APK releases](https://github.com/Flofyyk/PaperFluxAndroid/releases)
+
 ## Getting started
 
 1. Build or obtain a compatible PaperFlux Server for infrastructure you administer.

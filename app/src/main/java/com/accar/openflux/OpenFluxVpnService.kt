@@ -30,6 +30,9 @@ import java.util.concurrent.TimeUnit
 
 class OpenFluxVpnService : VpnService() {
     private val worker = Executors.newSingleThreadExecutor()
+    // Startup holds the service monitor while waiting for native readiness.
+    // The native log reader must never acquire that monitor for statistics.
+    private val statsLock = Any()
     private var tun: ParcelFileDescriptor? = null
     private var process: Process? = null
     private val workerProcesses = Collections.synchronizedList(mutableListOf<Process>())
@@ -166,6 +169,7 @@ class OpenFluxVpnService : VpnService() {
                 try {
                     child.inputStream.bufferedReader().useLines { lines ->
                         lines.forEach {
+                            if (process !== child || stopping) return@forEach
                             val safe = redactNativeLog(it)
                             val statsMatch = Regex("\\[PAPERFLUX_STATS\\] rx=(\\d+) tx=(\\d+) ping=(\\d+)").find(safe)
                             // Stats are consumed by the UI but do not need to
@@ -424,7 +428,7 @@ class OpenFluxVpnService : VpnService() {
         }.start()
     }
 
-    @Synchronized private fun acceptNativeStats(rx: Long, tx: Long, ping: Long) {
+    private fun acceptNativeStats(rx: Long, tx: Long, ping: Long) = synchronized(statsLock) {
         // A replacement native worker reports fresh counters from zero. Fold
         // its previous maximum into the session total instead of making the
         // UI appear to lose traffic after a reconnect.
@@ -438,7 +442,7 @@ class OpenFluxVpnService : VpnService() {
         persistAndBroadcastStats()
     }
 
-    @Synchronized private fun persistAndBroadcastStats() {
+    private fun persistAndBroadcastStats() = synchronized(statsLock) {
         TunnelSnapshot.updateStats(this, lastRxBytes, lastTxBytes, lastPingMs)
         val duration = TunnelSnapshot.read(this).optLong("durationSec", 0L)
         sendBroadcast(Intent(ACTION_STATE).setPackage(packageName)
