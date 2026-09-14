@@ -6,10 +6,9 @@
 
 <h1 align="center">PaperFlux Android</h1>
 
-<p align="center"><b>Экспериментальный Android-клиент для исследования документного транспорта</b></p>
+<p align="center"><b>Android VPN-клиент с транспортом через Yandex Docs</b></p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/status-experimental-6957e8?style=flat-square" alt="Экспериментальный статус">
   <img src="https://img.shields.io/badge/Android-8%2B-3ddc84?style=flat-square&logo=android&logoColor=white" alt="Android 8+">
   <img src="https://img.shields.io/badge/ABI-arm64--v8a-6f42c1?style=flat-square" alt="arm64-v8a">
   <img src="https://img.shields.io/badge/license-GPL--3.0-orange?style=flat-square" alt="GPL-3.0">
@@ -17,7 +16,9 @@
 
 <p align="center"><a href="README.en.md">English</a> · <b>Русский</b></p>
 
-PaperFlux Android — экспериментальный клиент для изучения документного сетевого транспорта на устройствах, которыми вы управляете. В нём нет готового сервера, документа, подписки или конфигурации доступа: все параметры добавляет локально человек, проводящий эксперимент.
+PaperFlux Android — VPN-клиент для подключения к серверу PaperFlux через Yandex Docs. Приложение поддерживает профили подключения, исключения приложений, статистику трафика и журнал событий.
+
+Для подключения добавьте свой профиль: импортируйте конфигурацию из буфера обмена или файла либо заполните параметры вручную. Сервер и ссылка на документ указываются в профиле.
 
 ## Интерфейс
 
