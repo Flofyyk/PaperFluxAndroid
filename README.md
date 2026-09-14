@@ -1,8 +1,23 @@
 # PaperFlux Android
 
-**Private document tunnel for Android** · **Material 3** · **arm64**
+<p align="center">
+  <img src="docs/images/paperflux-mark.svg" width="112" alt="PaperFlux logo">
+</p>
 
-PaperFlux is a small Android client for a user-supplied Yandex Docs profile. Add a profile, press connect, and the app routes device traffic through the encrypted PaperFlux channel. The connection is owned by a foreground service, so the UI may be closed without ending an active session.
+<h1 align="center">PaperFlux Android</h1>
+
+<p align="center"><b>Private document tunnel for Android</b><br>Profiles · Material 3 · Yandex Docs transport</p>
+
+<p align="center">
+  <img src="https://img.shields.io/badge/status-research-6957e8?style=flat-square" alt="Research status">
+  <img src="https://img.shields.io/badge/Android-8%2B-3ddc84?style=flat-square&logo=android&logoColor=white" alt="Android 8+">
+  <img src="https://img.shields.io/badge/ABI-arm64--v8a-6f42c1?style=flat-square" alt="arm64-v8a">
+  <img src="https://img.shields.io/badge/license-GPL--3.0-orange?style=flat-square" alt="GPL-3.0">
+</p>
+
+<p align="center"><a href="#paperflux-android">English</a> · <a href="README.ru.md">Русский</a></p>
+
+PaperFlux is a small Android client for a Yandex Docs profile supplied by the user. Add a profile, press connect, and the foreground service keeps the session alive while the interface is closed. The app contains no preconfigured server or document.
 
 > Research software. Use only with documents, servers, and networks you are authorized to use.
 
@@ -11,15 +26,16 @@ PaperFlux is a small Android client for a user-supplied Yandex Docs profile. Add
 <p align="center">
   <img src="docs/images/01-home.jpg" width="220" alt="PaperFlux home">
   <img src="docs/images/02-profiles.jpg" width="220" alt="PaperFlux profiles">
-  <img src="docs/images/03-logs.jpg" width="220" alt="PaperFlux session log">
+  <img src="docs/images/03-logs.jpg" width="220" alt="PaperFlux event log">
+</p>
+<p align="center">
   <img src="docs/images/04-settings.jpg" width="220" alt="PaperFlux settings">
 </p>
-
-The images are cropped from the app screens: Android status and navigation bars are intentionally excluded.
+<p align="center"><sub>App screens are cropped without the Android status and navigation bars.</sub></p>
 
 ## How it works
 
-The app deliberately contains no server address or ready-made document. A profile supplies the endpoint details, the Android service creates a TUN interface, and the native transport carries the session to an OpenFlux exit node.
+The profile supplies the document endpoint and session parameters at runtime. The Android service creates a TUN interface, the native worker carries framed traffic through Yandex Engine.IO/WebSocket, and the companion exit node opens the destination connection from the VPS.
 
 ```text
 Profile → Android TUN → PaperFlux transport → exit node → Internet
@@ -27,15 +43,15 @@ Profile → Android TUN → PaperFlux transport → exit node → Internet
 
 ## Client features
 
-- profile manager with import from clipboard, file, or manual fields;
-- encrypted local profile storage (the document token never appears in the public profile list);
-- Yandex Docs Engine.IO polling → WebSocket upgrade;
+- profile manager with clipboard, file, and manual import;
+- encrypted local profile storage; tokens are not shown in the profile list;
+- Yandex Docs polling handshake followed by WebSocket upgrade;
 - Android `VpnService` TUN integration and DNS routing;
-- background foreground-service lifecycle with automatic recovery;
+- foreground-service lifecycle with automatic recovery;
 - persistent per-session event journal and traffic counters;
-- a bundled native worker for the `arm64-v8a` ABI.
+- bundled native worker for `arm64-v8a`.
 
-The matching exit-node implementation is maintained in the companion [PaperFlux repository](https://github.com/Flofyyk/PaperFlux). The project started from [p1neappleXpress/OpenFlux](https://github.com/p1neappleXpress/OpenFlux); the PaperFlux UI and Android lifecycle are separate work.
+The matching exit-node implementation lives in the companion [PaperFlux Server](https://github.com/Flofyyk/PaperFlux) repository. The project is based on [p1neappleXpress/OpenFlux](https://github.com/p1neappleXpress/OpenFlux); the PaperFlux UI and Android lifecycle are maintained separately.
 
 ## Requirements
 
@@ -43,7 +59,7 @@ The matching exit-node implementation is maintained in the companion [PaperFlux 
 - Android SDK 35;
 - JDK 17;
 - Android NDK 27.0.12077973 or newer when rebuilding the native library;
-- an OpenFlux profile containing a permitted Yandex Docs document URL and access token.
+- a permitted Yandex Docs document and a matching PaperFlux exit node.
 
 ## Build
 
@@ -51,15 +67,13 @@ The matching exit-node implementation is maintained in the companion [PaperFlux 
 ./gradlew :app:assembleDebug
 ```
 
-The Gradle build embeds the bundled React UI from `app/src/main/assets/paperflux` and packages the native library from `app/src/main/jniLibs/arm64-v8a`.
+The build embeds the Material 3 UI from `app/src/main/assets/paperflux` and packages the native worker from `app/src/main/jniLibs/arm64-v8a`.
 
 Install a debug build with:
 
 ```bash
 adb install -r app/build/outputs/apk/debug/app-debug.apk
 ```
-
-Installing an update stops the current VPN service; reconnect once after updating.
 
 ## Importing a profile
 
@@ -69,8 +83,8 @@ The app accepts a `paperflux://config` URI or JSON file. A minimal URI looks lik
 paperflux://config?id=1&name=Home&server=203.0.113.10&ip=10.10.10.2&doc=https%3A%2F%2Fdisk.yandex.ru%2Fi%2Fexample&token=YOUR_TOKEN
 ```
 
-Never commit a real token, document URL, or private server address. Import profiles locally instead. The app masks tokens in the profile list and bounds the local session journal.
+Never commit a real token, document URL, or private server address. Import profiles locally instead.
 
 ## License
 
-The Android client follows the license of the OpenFlux project. See [LICENSE](https://github.com/p1neappleXpress/OpenFlux/blob/main/LICENSE) and the companion repository for third-party notices.
+The Android client follows the OpenFlux project license. See [LICENSE](https://github.com/p1neappleXpress/OpenFlux/blob/main/LICENSE) and the companion server repository for third-party notices.

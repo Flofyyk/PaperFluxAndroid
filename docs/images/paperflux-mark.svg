@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-labelledby="title">
+  <title id="title">PaperFlux mark</title>
+  <rect width="128" height="128" rx="28" fill="#5B4FE8"/>
+  <path d="M39 25h32l18 18v60H39z" fill="#fff"/>
+  <path d="M71 25v21h18" fill="none" stroke="#5B4FE8" stroke-width="4" stroke-linejoin="round"/>
+  <path d="M49 58h30M49 69h30M49 80h21" fill="none" stroke="#5B4FE8" stroke-width="4" stroke-linecap="round"/>
+  <path d="M47 94h36" fill="none" stroke="#C9C3FF" stroke-width="4" stroke-linecap="round"/>
+</svg>
