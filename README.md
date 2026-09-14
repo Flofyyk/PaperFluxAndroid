@@ -35,7 +35,7 @@ Profile → Android TUN → PaperFlux transport → exit node → Internet
 - persistent per-session event journal and traffic counters;
 - a bundled native worker for the `arm64-v8a` ABI.
 
-The matching exit-node implementation is maintained in the companion [OpenFlux repository](https://github.com/Flofyyk/OpenFlux). The project started from [p1neappleXpress/OpenFlux](https://github.com/p1neappleXpress/OpenFlux); the PepperFlux UI and Android lifecycle are separate work.
+The matching exit-node implementation is maintained in the companion [OpenFlux repository](https://github.com/Flofyyk/OpenFlux). The project started from [p1neappleXpress/OpenFlux](https://github.com/p1neappleXpress/OpenFlux); the PaperFlux UI and Android lifecycle are separate work.
 
 ## Requirements
 
