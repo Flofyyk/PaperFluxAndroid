@@ -1,72 +1,72 @@
 # PaperFlux Android
 
 <p align="center">
-  <img src="docs/images/paperflux-mark.svg" width="112" alt="PaperFlux logo">
+  <img src="docs/images/paperflux-mark.svg" width="112" alt="Логотип PaperFlux">
 </p>
 
 <h1 align="center">PaperFlux Android</h1>
 
-<p align="center"><b>Experimental Android companion for document-transport research</b></p>
+<p align="center"><b>Экспериментальный Android-клиент для исследования документного транспорта</b></p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/status-experimental-6957e8?style=flat-square" alt="Experimental status">
+  <img src="https://img.shields.io/badge/status-experimental-6957e8?style=flat-square" alt="Экспериментальный статус">
   <img src="https://img.shields.io/badge/Android-8%2B-3ddc84?style=flat-square&logo=android&logoColor=white" alt="Android 8+">
   <img src="https://img.shields.io/badge/ABI-arm64--v8a-6f42c1?style=flat-square" alt="arm64-v8a">
   <img src="https://img.shields.io/badge/license-GPL--3.0-orange?style=flat-square" alt="GPL-3.0">
 </p>
 
-<p align="center"><a href="#paperflux-android">English</a> · <a href="README.ru.md">Русский</a></p>
+<p align="center"><a href="README.en.md">English</a> · <b>Русский</b></p>
 
-PaperFlux Android is an experimental client for studying document-based network transport on devices you control. It does not include a ready-made server, document, subscription, or access configuration: those are supplied locally by the person running the experiment.
+PaperFlux Android — экспериментальный клиент для изучения документного сетевого транспорта на устройствах, которыми вы управляете. В нём нет готового сервера, документа, подписки или конфигурации доступа: все параметры добавляет локально человек, проводящий эксперимент.
 
-## Interface
+## Интерфейс
 
 <div align="center">
-  <img src="docs/images/01-home.jpg" width="160" alt="PaperFlux home">
-  <img src="docs/images/02-profiles.jpg" width="160" alt="PaperFlux profiles">
-  <img src="docs/images/03-logs.jpg" width="160" alt="PaperFlux event log">
-  <img src="docs/images/04-settings.jpg" width="160" alt="PaperFlux settings">
+  <img src="docs/images/01-home.jpg" width="160" alt="Главный экран PaperFlux">
+  <img src="docs/images/02-profiles.jpg" width="160" alt="Профили PaperFlux">
+  <img src="docs/images/03-logs.jpg" width="160" alt="Журнал PaperFlux">
+  <img src="docs/images/04-settings.jpg" width="160" alt="Настройки PaperFlux">
 </div>
-<p align="center"><sub>Application screens, cropped without Android system bars.</sub></p>
+<p align="center"><sub>Экраны приложения без системных строк Android.</sub></p>
 
-## Features
+## Возможности
 
-- Android VPN service with session traffic counters and a persistent event journal.
-- Profiles with selection, editing and deletion; import from clipboard, file or manual entry.
-- Per-app exclusions: selected applications bypass the VPN. Reconnect after changing the list.
-- Yandex Docs transport with authenticated tunnel readiness checks and reconnection handling.
-- Foreground notification with connection state, traffic totals and a disconnect action.
-- Profile secrets stored in encrypted device storage.
+- Системный Android VPN с учётом времени и трафика сессии и сохраняемым журналом событий.
+- Профили: выбор, редактирование, удаление, импорт из буфера, файла и ручной ввод.
+- Исключения приложений: выбранные приложения работают в обход VPN. После изменения списка нужно переподключиться.
+- Транспорт Yandex Docs с проверкой готовности защищённого канала и восстановлением соединения.
+- Уведомление со статусом, счётчиками трафика и кнопкой отключения.
+- Хранение секретов профиля в зашифрованном хранилище устройства.
 
-## Compatibility and limits
+## Совместимость и ограничения
 
-The packaged client targets Android 8+ on ARM64. It requires a compatible PaperFlux exit node and a valid profile; opening a document alone does not grant server access. The current Android worker uses one document per connection. Multi-document aggregation is not enabled. Network changes and Yandex availability can interrupt a session; this remains an experimental release.
+Готовая сборка рассчитана на Android 8+ и ARM64. Нужны совместимый PaperFlux Server и действующий профиль: сама ссылка на документ не предоставляет доступ к серверу. Android-клиент использует один документ на подключение; объединение нескольких каналов пока не включено. Смена сети и недоступность Яндекса могут прерывать сессию. Версия остаётся экспериментальной.
 
-[Download APK releases](https://github.com/Flofyyk/PaperFluxAndroid/releases)
+[Скачать APK из релизов](https://github.com/Flofyyk/PaperFluxAndroid/releases)
 
-## Getting started
+## Начало работы
 
-1. Build or obtain a compatible PaperFlux Server for infrastructure you administer.
-2. Install the Android APK on an `arm64-v8a` device running Android 8.0 or later.
-3. Import a configuration that belongs to you, then start a test session from the app.
+1. Соберите или подготовьте совместимый PaperFlux Server для инфраструктуры, которую вы администрируете.
+2. Установите APK на устройство `arm64-v8a` с Android 8.0 или новее.
+3. Импортируйте собственную конфигурацию и запустите тестовую сессию из приложения.
 
-The matching server source is in [PaperFlux Server](https://github.com/Flofyyk/PaperFlux). The project started from [p1neappleXpress/OpenFlux](https://github.com/p1neappleXpress/OpenFlux); PaperFlux Android is maintained as a separate client.
+Исходный код серверной части находится в [PaperFlux Server](https://github.com/Flofyyk/PaperFlux). Проект основан на [p1neappleXpress/OpenFlux](https://github.com/p1neappleXpress/OpenFlux); PaperFlux Android поддерживается как отдельный клиент.
 
-## Build from source
+## Сборка из исходников
 
-Requirements: Android SDK 35, JDK 17, and Android NDK 27.0.12077973 or newer when rebuilding native code.
+Нужны Android SDK 35, JDK 17 и Android NDK 27.0.12077973+ для пересборки native-кода.
 
 ```bash
 ./gradlew :app:assembleDebug
 adb install -r app/build/outputs/apk/debug/app-debug.apk
 ```
 
-## Disclaimer
+## Отказ от ответственности
 
-PaperFlux is experimental research software provided **as is**, without warranties or guarantees of availability, privacy, security, performance, or fitness for a particular purpose. The authors do not operate a service, provide access credentials, or take responsibility for how the software is configured or used.
+PaperFlux — экспериментальное исследовательское ПО, которое предоставляется «как есть», без гарантий доступности, приватности, безопасности, производительности или пригодности для какой-либо цели. Авторы не предоставляют сервис, доступы или готовые конфигурации и не отвечают за настройку и использование программы.
 
-Use it only for education, research, and testing on systems, documents, servers, and networks you own or are explicitly authorized to use. You are solely responsible for legal compliance, configuration security, data handling, and all traffic generated by your installation.
+Используйте проект только для обучения, исследований и тестов на собственных либо явно разрешённых системах, документах, серверах и сетях. За соблюдение законов, безопасность конфигурации, работу с данными и весь трафик, созданный вашей установкой, отвечаете вы.
 
-## License
+## Лицензия
 
-PaperFlux Android follows the OpenFlux project license. See [LICENSE](https://github.com/p1neappleXpress/OpenFlux/blob/main/LICENSE) and the companion server repository for third-party notices.
+PaperFlux Android следует лицензии OpenFlux. См. [LICENSE](https://github.com/p1neappleXpress/OpenFlux/blob/main/LICENSE) и уведомления о сторонних лицензиях в серверном репозитории.
