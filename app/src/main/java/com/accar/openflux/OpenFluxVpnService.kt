@@ -37,7 +37,10 @@ class OpenFluxVpnService : VpnService() {
     private val reconnectWorker = Executors.newSingleThreadScheduledExecutor()
     private val reconnectScheduled = AtomicBoolean(false)
     private val recoveryGeneration = AtomicInteger(0)
+    private val sessionGeneration = AtomicInteger(0)
+    private val fullRecoveryScheduled = AtomicBoolean(false)
     @Volatile private var reconnectFuture: ScheduledFuture<*>? = null
+    @Volatile private var fullRecoveryFuture: ScheduledFuture<*>? = null
     @Volatile private var reconnectAttempt = 0
     // Startup holds the service monitor while waiting for native readiness.
     // The native log reader must never acquire that monitor for statistics.
@@ -64,6 +67,11 @@ class OpenFluxVpnService : VpnService() {
     private val networkCallback = object : ConnectivityManager.NetworkCallback() {
         override fun onAvailable(network: android.net.Network) {
             if (wantsConnection() && !tunnelRunning) scheduleReconnect("Сеть доступна. Восстанавливаем защищённый канал", immediate = true)
+        }
+        override fun onLost(network: android.net.Network) {
+            // Android can report a short Wi-Fi -> mobile handover gap. Give
+            // its network stack a moment before tearing down a live attempt.
+            reconnectWorker.schedule({ pauseForMissingNetwork() }, 600, TimeUnit.MILLISECONDS)
         }
         override fun onCapabilitiesChanged(network: android.net.Network, caps: NetworkCapabilities) {
             if (caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) && wantsConnection() && !tunnelRunning) {
@@ -130,7 +138,10 @@ class OpenFluxVpnService : VpnService() {
 
     @Synchronized
     private fun startTunnel() {
+        val attempt = sessionGeneration.incrementAndGet()
+        fun current() = attempt == sessionGeneration.get() && wantsConnection() && !stopping
         try {
+            if (!wantsConnection()) return
             stopping = false
             releaseTunnelResources()
             tunnelRunning = false
@@ -190,7 +201,7 @@ class OpenFluxVpnService : VpnService() {
                 try {
                     child.inputStream.bufferedReader().useLines { lines ->
                         lines.forEach {
-                            if (process !== child || stopping) return@forEach
+                            if (process !== child || !current()) return@forEach
                             val safe = redactNativeLog(it)
                             val statsMatch = Regex("\\[PAPERFLUX_STATS\\] rx=(\\d+) tx=(\\d+) ping=(\\d+)").find(safe)
                             // Stats are consumed by the UI but do not need to
@@ -204,27 +215,27 @@ class OpenFluxVpnService : VpnService() {
                             // core. PEER_READY is intentionally emitted only
                             // after that descriptor has been received, so
                             // waiting for it here creates a startup deadlock.
-                            if (safe.contains("[PAPERFLUX] YANDEX_AUTH_OK") || safe.contains("[PAPERFLUX] PEER_READY")) {
+                            if (current() && (safe.contains("[PAPERFLUX] YANDEX_AUTH_OK") || safe.contains("[PAPERFLUX] PEER_READY"))) {
                                 nativeAuthenticated = true
                             }
-                            if (safe.contains("[PAPERFLUX] TUNNEL_READY")) {
+                            if (current() && safe.contains("[PAPERFLUX] TUNNEL_READY")) {
                                 val recovered = !nativeTunnelReady
                                 nativeTunnelReady = true
                                 cancelFullRecovery()
                                 if (tunnelRunning && !stopping) TunnelSnapshot.write(this@OpenFluxVpnService, "CONNECTED", "Шифрованный туннель: DNS и TCP подтверждены")
                                 if (recovered && tunnelRunning && !stopping) publish("CONNECTED", "Шифрованный туннель: DNS и TCP подтверждены")
                             }
-                            if (safe.contains("[PAPERFLUX] TUNNEL_HEALTHY") && nativeTunnelReady && tunnelRunning && !stopping) {
+                            if (current() && safe.contains("[PAPERFLUX] TUNNEL_HEALTHY") && nativeTunnelReady && tunnelRunning) {
                                 // Refresh the cross-process snapshot without adding a
                                 // duplicate CONNECTED item to the visible journal.
                                 TunnelSnapshot.write(this@OpenFluxVpnService, "CONNECTED", "Шифрованный туннель: DNS и TCP подтверждены")
                             }
-                            if (safe.contains("PEER_LOST") || safe.contains("TUNNEL_LOST")) {
+                            if (current() && (safe.contains("PEER_LOST") || safe.contains("TUNNEL_LOST"))) {
                                 nativeTunnelReady = false
                                 publish("RECONNECTING", "Нет ответа через защищённый канал")
                                 scheduleFullRecovery("Защищённая сессия не восстановилась")
                             }
-                            if (safe.contains("Yandex transport lost") || safe.contains("WebSocket write failed")) {
+                            if (current() && (safe.contains("Yandex transport lost") || safe.contains("WebSocket write failed"))) {
                                 nativeAuthenticated = false
                                 nativeTunnelReady = false
                                 publish("RECONNECTING", "Связь с Yandex Docs прервана. Восстанавливаем соединение")
@@ -245,20 +256,20 @@ class OpenFluxVpnService : VpnService() {
             Thread.sleep(50)
             publish("TRANSPORT", "Ожидаем подтверждение авторизации Яндекс Docs")
             val authDeadline = System.currentTimeMillis() + 75_000
-            while (!stopping && !nativeAuthenticated && System.currentTimeMillis() < authDeadline) {
+            while (current() && !nativeAuthenticated && System.currentTimeMillis() < authDeadline) {
                 if (!child.isAlive) {
                     val code = runCatching { child.exitValue() }.getOrDefault(-1)
                     error("Соединение завершилось до подтверждения. Повторите попытку")
                 }
                 Thread.sleep(100)
             }
-            if (stopping) return
+            if (!current()) return
             check(nativeAuthenticated) { "Не удалось подтвердить защищённое соединение. Проверьте профиль и повторите попытку" }
             sendTunFd(socketName, tun!!)
             publish("DNS", "Проверяем DNS и TCP через защищённый канал")
             val tunnelDeadline = System.currentTimeMillis() + 35_000
-            while (!stopping && !nativeTunnelReady && child.isAlive && System.currentTimeMillis() < tunnelDeadline) Thread.sleep(200)
-            if (stopping) return
+            while (current() && !nativeTunnelReady && child.isAlive && System.currentTimeMillis() < tunnelDeadline) Thread.sleep(200)
+            if (!current()) return
             check(nativeTunnelReady) { "Защищённый канал создан, но доступ к интернету пока не подтверждён" }
             tunnelRunning = true
             reconnectAttempt = 0
@@ -268,7 +279,7 @@ class OpenFluxVpnService : VpnService() {
             startNetworkWatchdog()
             Thread {
                 val exitCode = child.waitFor()
-                if (process === child && tunnelRunning && !stopping) {
+                if (process === child && tunnelRunning && current()) {
                     Log.w("OpenFluxVpn", "Native transport stopped: $exitCode")
                     nativeAuthenticated = false
                     publish("RECONNECTING", "Восстанавливаем соединение с Yandex Docs")
@@ -279,14 +290,19 @@ class OpenFluxVpnService : VpnService() {
                 }
             }.start()
         } catch (e: Exception) {
-            if (stopping || e is InterruptedException) return
+            if (!current() || e is InterruptedException) return
             Log.e("OpenFluxVpn", "Tunnel startup failed", e)
             startForeground(NOTIFICATION_ID, notification("PaperFlux: не удалось подключиться"))
             publish("ERROR", explainFailure(e))
             releaseTunnelResources()
             if (wantsConnection() && autoReconnectEnabled()) scheduleReconnect(explainFailure(e))
+            else if (wantsConnection()) {
+                preferences().edit().putBoolean(DESIRED_ACTIVE, false).apply()
+                stopForeground(STOP_FOREGROUND_REMOVE)
+                stopSelf()
+            }
         } finally {
-            starting = false
+            if (attempt == sessionGeneration.get()) starting = false
         }
     }
 
@@ -425,6 +441,7 @@ class OpenFluxVpnService : VpnService() {
     }
     private fun stopTunnel(announce: Boolean = true, clearDesired: Boolean = true) {
         if (clearDesired) preferences().edit().putBoolean(DESIRED_ACTIVE, false).apply()
+        sessionGeneration.incrementAndGet()
         cancelReconnects()
         if (stopping) return
         stopping = true
@@ -485,12 +502,7 @@ class OpenFluxVpnService : VpnService() {
                     misses = 0
                 } else {
                     misses++
-                    if (misses == 2) publish("WAITING_NETWORK", "Ожидаем подключения к Wi‑Fi или мобильной сети")
-                    if (misses >= 3) {
-                        nativeTunnelReady = false
-                        scheduleReconnect("Интернет временно недоступен")
-                        misses = 0
-                    }
+                    if (misses >= 2) { pauseForMissingNetwork(); break }
                 }
                 try { Thread.sleep(5000) } catch (_: InterruptedException) { break }
             }
@@ -539,18 +551,44 @@ class OpenFluxVpnService : VpnService() {
     private fun preferences() = getSharedPreferences(PREFS, Context.MODE_PRIVATE)
     private fun wantsConnection() = preferences().getBoolean(DESIRED_ACTIVE, false)
     private fun autoReconnectEnabled() = preferences().getBoolean(AUTO_RECONNECT, true)
-    private fun cancelFullRecovery() { recoveryGeneration.incrementAndGet() }
-    private fun cancelReconnects() {
+    private fun cancelFullRecovery() {
         recoveryGeneration.incrementAndGet()
+        fullRecoveryFuture?.cancel(false); fullRecoveryFuture = null
+        fullRecoveryScheduled.set(false)
+    }
+    private fun cancelReconnects() {
+        cancelFullRecovery()
         reconnectFuture?.cancel(false); reconnectFuture = null
         reconnectScheduled.set(false); reconnectAttempt = 0
     }
     /** Recreate TUN + native transport after a grace period unless a new TUNNEL_READY arrives. */
     private fun scheduleFullRecovery(reason: String) {
+        if (!fullRecoveryScheduled.compareAndSet(false, true)) return
         val generation = recoveryGeneration.incrementAndGet()
-        reconnectWorker.schedule({
-            if (generation == recoveryGeneration.get() && !nativeTunnelReady) scheduleReconnect(reason, immediate = true)
+        fullRecoveryFuture = reconnectWorker.schedule({
+            fullRecoveryScheduled.set(false)
+            if (generation == recoveryGeneration.get() && !nativeTunnelReady) {
+                sessionGeneration.incrementAndGet()
+                releaseTunnelResources()
+                scheduleReconnect(reason, immediate = true)
+            }
         }, 20, TimeUnit.SECONDS)
+    }
+    /** Stop the failed path immediately and wait for Android to report a usable network. */
+    private fun pauseForMissingNetwork() {
+        if (!wantsConnection() || hasUnderlyingInternet()) return
+        if (!autoReconnectEnabled()) {
+            stopTunnel(announce = true)
+            return
+        }
+        sessionGeneration.incrementAndGet()
+        starting = false
+        statsRunning = false
+        networkWatchRunning = false
+        cancelFullRecovery()
+        releaseTunnelResources()
+        publish("WAITING_NETWORK", "Интернет недоступен. Ожидаем Wi‑Fi или мобильную сеть")
+        startForeground(NOTIFICATION_ID, notification("PaperFlux: ожидаем сеть"))
     }
     private fun scheduleReconnect(reason: String, immediate: Boolean = false) {
         if (!wantsConnection() || !autoReconnectEnabled() || stopping) return
@@ -569,7 +607,6 @@ class OpenFluxVpnService : VpnService() {
             }
             if (!hasUnderlyingInternet()) {
                 publish("WAITING_NETWORK", "Ожидаем подключения к Wi‑Fi или мобильной сети")
-                scheduleReconnect("Сеть пока недоступна")
                 return@schedule
             }
             starting = true

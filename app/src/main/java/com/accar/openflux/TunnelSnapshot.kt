@@ -43,8 +43,6 @@ object TunnelSnapshot {
         val alive = context.getSystemService(android.app.ActivityManager::class.java)?.runningAppProcesses?.any { it.processName == "${context.packageName}:vpn" } == true
         if (!alive && data.optString("state") != "ERROR") {
             data.put("state", "DISCONNECTED").put("detail", "Туннель отключён")
-        } else if (data.optString("state") == "CONNECTED" && SystemClock.elapsedRealtime() - data.optLong("elapsed") > 180_000) {
-            data.put("state", "RECONNECTING").put("detail", "Ожидаем подтверждение работоспособности туннеля")
         }
         val started = data.optLong("sessionStartedElapsed", 0L)
         if (started > 0L) data.put("durationSec", ((SystemClock.elapsedRealtime() - started) / 1000L).coerceAtLeast(0L))
