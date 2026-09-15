@@ -11,7 +11,7 @@
         </intent>
     </queries>
     <application android:usesCleartextTraffic="true" android:extractNativeLibs="true" android:theme="@style/AppTheme" android:label="PaperFlux" android:icon="@drawable/ic_paperflux_mark" android:roundIcon="@drawable/ic_paperflux_mark">
-        <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
+        <activity android:name=".MainActivity" android:exported="true">
             <intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter>
         </activity>
         <service android:name=".OpenFluxVpnService" android:permission="android.permission.BIND_VPN_SERVICE" android:exported="false" android:process=":vpn" android:stopWithTask="false" android:foregroundServiceType="specialUse">

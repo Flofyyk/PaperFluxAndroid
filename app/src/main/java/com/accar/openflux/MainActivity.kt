@@ -34,6 +34,9 @@ import android.text.style.ForegroundColorSpan
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.card.MaterialCardView
 import com.google.android.material.bottomnavigation.BottomNavigationView
@@ -43,6 +46,7 @@ import com.google.android.material.textfield.TextInputLayout
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import java.text.Collator
 import java.io.ByteArrayOutputStream
 
 class MainActivity : AppCompatActivity() {
@@ -114,9 +118,9 @@ class MainActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        // Encoding dozens of launcher icons is expensive. Do it off the UI
-        // thread so opening Settings never blocks the WebView animation.
-        Thread { installedAppsCache = installedAppsJson(includeIcons = true) }.start()
+        WindowCompat.setDecorFitsSystemWindows(window, false)
+        // App labels are cheap; icons are requested lazily by the WebView.
+        Thread { installedAppsCache = installedAppsJson(includeIcons = false) }.start()
         buildWebUi()
     }
     override fun onStart() {
@@ -138,6 +142,7 @@ class MainActivity : AppCompatActivity() {
             webViewClient = object : WebViewClient() {
                 override fun onPageFinished(view: WebView, url: String) {
                     super.onPageFinished(view, url)
+                    ViewCompat.getRootWindowInsets(view)?.let { applyWebInsets(view, it) }
                     // The VPN service can finish authentication while the
                     // WebView is still loading. Replay the persisted state so
                     // the UI cannot remain stuck on the connecting spinner.
@@ -157,7 +162,28 @@ class MainActivity : AppCompatActivity() {
             loadUrl("file:///android_asset/paperflux/index.html")
         }
         designWeb = web
+        ViewCompat.setOnApplyWindowInsetsListener(web) { view, insets ->
+            (view as? WebView)?.let { applyWebInsets(it, insets) }
+            insets
+        }
         setContentView(web)
+        ViewCompat.requestApplyInsets(web)
+    }
+
+    private fun applyWebInsets(web: WebView, insets: WindowInsetsCompat) {
+        val safe = insets.getInsets(WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout() or WindowInsetsCompat.Type.ime())
+        // WebView CSS pixels are density-independent while WindowInsets are
+        // physical pixels. Passing the raw number made a 3x status inset on
+        // high-density devices and pushed the whole header far down.
+        val density = resources.displayMetrics.density.coerceAtLeast(1f)
+        fun cssPx(value: Int) = (value / density).toInt()
+        web.post {
+            web.evaluateJavascript(
+                "document.documentElement.style.setProperty('--pf-inset-top','${cssPx(safe.top)}px');" +
+                    "document.documentElement.style.setProperty('--pf-inset-right','${cssPx(safe.right)}px');" +
+                    "document.documentElement.style.setProperty('--pf-inset-bottom','${cssPx(safe.bottom)}px');" +
+                    "document.documentElement.style.setProperty('--pf-inset-left','${cssPx(safe.left)}px');", null)
+        }
     }
 
     private fun sendWebState(state: String?, detail: String? = null, event: String? = null, rx: Long = -1L, tx: Long = -1L, ping: Long = -1L, duration: Long = -1L) {
@@ -232,6 +258,13 @@ class MainActivity : AppCompatActivity() {
         } catch (e: Exception) { e.message ?: "Ошибка профиля" }
         @JavascriptInterface fun connect() = runOnUiThread { requestConnect() }
         @JavascriptInterface fun disconnect() = runOnUiThread { startService(Intent(this@MainActivity, OpenFluxVpnService::class.java).setAction(OpenFluxVpnService.STOP)) }
+        @JavascriptInterface fun setAutoReconnect(enabled: Boolean) {
+            getSharedPreferences(OpenFluxVpnService.PREFS, MODE_PRIVATE).edit().putBoolean(OpenFluxVpnService.AUTO_RECONNECT, enabled).apply()
+            startService(Intent(this@MainActivity, OpenFluxVpnService::class.java)
+                .setAction(OpenFluxVpnService.UPDATE_SETTINGS).putExtra(OpenFluxVpnService.EXTRA_AUTO_RECONNECT, enabled))
+        }
+        @JavascriptInterface fun getAutoReconnect(): Boolean = getSharedPreferences(OpenFluxVpnService.PREFS, MODE_PRIVATE)
+            .getBoolean(OpenFluxVpnService.AUTO_RECONNECT, true)
         @JavascriptInterface fun getDocumentUrl(): String = getSharedPreferences(OpenFluxVpnService.PREFS, MODE_PRIVATE).getString("document", "") ?: ""
         @JavascriptInterface fun setDocumentUrl(value: String) {
             getSharedPreferences(OpenFluxVpnService.PREFS, MODE_PRIVATE).edit().putString("document", value.trim()).apply()
@@ -280,6 +313,9 @@ class MainActivity : AppCompatActivity() {
         @JavascriptInterface fun getSessionLogs(): String = SessionJournal.read(this@MainActivity)
         @JavascriptInterface fun clearSessionLogs() { SessionJournal.clear(this@MainActivity) }
         @JavascriptInterface fun getInstalledApps(): String = installedAppsCache ?: installedAppsJson(includeIcons = false)
+        @JavascriptInterface fun getAppIcon(pkg: String): String = runCatching {
+            drawableDataUri(packageManager.getApplicationIcon(pkg))
+        }.getOrDefault("")
         @JavascriptInterface fun setExcludedApps(raw: String) {
             runCatching {
                 val values = mutableSetOf<String>()
@@ -287,7 +323,7 @@ class MainActivity : AppCompatActivity() {
                 for (i in 0 until array.length()) array.optString(i).takeIf { it.isNotBlank() }?.let(values::add)
                 getSharedPreferences(OpenFluxVpnService.PREFS, MODE_PRIVATE).edit().putStringSet(OpenFluxVpnService.EXCLUDED_APPS, values).apply()
                 installedAppsCache = null
-                Thread { installedAppsCache = installedAppsJson(includeIcons = true) }.start()
+                Thread { installedAppsCache = installedAppsJson(includeIcons = false) }.start()
             }
         }
     }
@@ -299,8 +335,7 @@ class MainActivity : AppCompatActivity() {
             .map { it.activityInfo.applicationInfo }
             .distinctBy { it.packageName }
             .filter { it.packageName != packageName }
-            .sortedBy { packageManager.getApplicationLabel(it).toString().lowercase(Locale.getDefault()) }
-            .take(50)
+            .sortedWith { left, right -> Collator.getInstance(Locale.getDefault()).compare(packageManager.getApplicationLabel(left).toString(), packageManager.getApplicationLabel(right).toString()) }
         val result = org.json.JSONArray()
         apps.forEach { app ->
             val obj = org.json.JSONObject()
