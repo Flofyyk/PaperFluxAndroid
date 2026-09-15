@@ -66,7 +66,7 @@ class OpenFluxVpnService : VpnService() {
     @Volatile private var txOffsetBytes = 0L
     private val networkCallback = object : ConnectivityManager.NetworkCallback() {
         override fun onAvailable(network: android.net.Network) {
-            if (wantsConnection() && !tunnelRunning) scheduleReconnect("Сеть доступна. Восстанавливаем защищённый канал", immediate = true)
+            if (wantsConnection() && !tunnelRunning && !starting) scheduleReconnect("Сеть доступна. Восстанавливаем защищённый канал", immediate = true)
         }
         override fun onLost(network: android.net.Network) {
             // Android can report a short Wi-Fi -> mobile handover gap. Give
@@ -74,7 +74,7 @@ class OpenFluxVpnService : VpnService() {
             reconnectWorker.schedule({ pauseForMissingNetwork() }, 600, TimeUnit.MILLISECONDS)
         }
         override fun onCapabilitiesChanged(network: android.net.Network, caps: NetworkCapabilities) {
-            if (caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) && wantsConnection() && !tunnelRunning) {
+            if (caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) && wantsConnection() && !tunnelRunning && !starting) {
                 scheduleReconnect("Сеть готова. Восстанавливаем защищённый канал", immediate = true)
             }
         }
@@ -600,11 +600,10 @@ class OpenFluxVpnService : VpnService() {
         reconnectFuture = reconnectWorker.schedule({
             reconnectScheduled.set(false)
             if (!wantsConnection() || !autoReconnectEnabled()) return@schedule
-            if (starting) {
-                reconnectScheduled.set(false)
-                scheduleReconnect(reason)
-                return@schedule
-            }
+            // Network callbacks are noisy while VPN establishes its own
+            // interface. A queued callback must not replace a session that is
+            // already starting or has just become healthy.
+            if (tunnelRunning || starting) return@schedule
             if (!hasUnderlyingInternet()) {
                 publish("WAITING_NETWORK", "Ожидаем подключения к Wi‑Fi или мобильной сети")
                 return@schedule
