@@ -46,6 +46,22 @@ class ProfileStore(private val context: Context) {
         for (i in 0 until rows.length()) if (rows.getJSONObject(i).getString("id") == data.optString("activeId")) return rows.getJSONObject(i)
         return null
     }
+    private fun documents(profile: JSONObject): JSONArray {
+        val source = profile.optJSONArray("documentUrls")
+        val result = JSONArray()
+        val seen = linkedSetOf<String>()
+        if (source != null) for (i in 0 until source.length()) source.optString(i).trim().takeIf { it.isNotEmpty() }?.let { seen += it }
+        if (seen.isEmpty()) profile.optString("documentUrl").split(',').map { it.trim() }.filter { it.isNotEmpty() }.forEach { seen += it }
+        seen.forEach { result.put(it) }
+        return result
+    }
+    private fun canonical(profile: JSONObject): JSONObject {
+        val value = JSONObject(profile.toString())
+        val docs = documents(value)
+        value.put("documentUrls", docs)
+        value.put("documentUrl", (0 until docs.length()).joinToString(",") { docs.getString(it) })
+        return value
+    }
     fun migrate() {
         if (file.baseFile.exists()) return
         val prefs = context.getSharedPreferences(OpenFluxVpnService.PREFS, Context.MODE_PRIVATE)
@@ -65,14 +81,15 @@ class ProfileStore(private val context: Context) {
         return data.toString()
     }
     fun save(profile: JSONObject) {
+        val canonical = canonical(profile)
         val data = read()
         val rows = data.getJSONArray("profiles")
         val next = JSONArray()
-        for (i in 0 until rows.length()) if (rows.getJSONObject(i).getString("id") != profile.getString("id")) next.put(rows.getJSONObject(i))
-        next.put(profile)
-        data.put("profiles", next).put("activeId", profile.getString("id"))
+        for (i in 0 until rows.length()) if (rows.getJSONObject(i).getString("id") != canonical.getString("id")) next.put(rows.getJSONObject(i))
+        next.put(canonical)
+        data.put("profiles", next).put("activeId", canonical.getString("id"))
         write(data)
-        mirror(profile)
+        mirror(canonical)
     }
     fun select(id: String) {
         val data = read()
@@ -93,9 +110,10 @@ class ProfileStore(private val context: Context) {
                 next.put(current)
                 continue
             }
-            val value = JSONObject(current.toString())
-                .put("name", name).put("server", server)
-                .put("documentUrl", documentUrl).put("clientIp", clientIp)
+            val edited = JSONObject(current.toString()).put("name", name).put("server", server)
+            edited.remove("documentUrls")
+            edited.put("documentUrl", documentUrl).put("clientIp", clientIp)
+            val value = canonical(edited)
             replacementToken?.takeIf { it.isNotBlank() }?.let { value.put("token", it) }
             updated = value
             next.put(value)
@@ -118,7 +136,7 @@ class ProfileStore(private val context: Context) {
     private fun mirror(profile: JSONObject?) {
         // Compatibility fields contain no secret. Native startup reads active() atomically.
         check(context.getSharedPreferences(OpenFluxVpnService.PREFS, Context.MODE_PRIVATE).edit()
-            .putString("document", profile?.optString("documentUrl").orEmpty())
+            .putString("document", profile?.let { documents(it).let { docs -> (0 until docs.length()).joinToString(",") { i -> docs.getString(i) } } }.orEmpty())
             .putString("profile_id", profile?.optString("id").orEmpty())
             .putString("profile_name", profile?.optString("name").orEmpty())
             .putString("client_ip", profile?.optString("clientIp").orEmpty())

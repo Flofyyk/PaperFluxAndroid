@@ -179,10 +179,12 @@ class MainActivity : AppCompatActivity() {
         fun cssPx(value: Int) = (value / density).toInt()
         web.post {
             web.evaluateJavascript(
-                "document.documentElement.style.setProperty('--pf-inset-top','${cssPx(safe.top)}px');" +
-                    "document.documentElement.style.setProperty('--pf-inset-right','${cssPx(safe.right)}px');" +
-                    "document.documentElement.style.setProperty('--pf-inset-bottom','${cssPx(safe.bottom)}px');" +
-                    "document.documentElement.style.setProperty('--pf-inset-left','${cssPx(safe.left)}px');", null)
+                "(function(root){if(!root)return;" +
+                    "root.style.setProperty('--pf-inset-top','${cssPx(safe.top)}px');" +
+                    "root.style.setProperty('--pf-inset-right','${cssPx(safe.right)}px');" +
+                    "root.style.setProperty('--pf-inset-bottom','${cssPx(safe.bottom)}px');" +
+                    "root.style.setProperty('--pf-inset-left','${cssPx(safe.left)}px');" +
+                    "})(document.documentElement);", null)
         }
     }
 
@@ -222,16 +224,19 @@ class MainActivity : AppCompatActivity() {
         }
         val id = source.optString("id").trim()
         val token = source.optString("token").trim()
-        val document = source.optString("documentUrl", source.optString("doc")).trim()
+        val documents = source.optJSONArray("documentUrls")?.let { values ->
+            (0 until values.length()).map { values.optString(it).trim() }.filter { it.isNotEmpty() }
+        } ?: source.optString("documentUrl", source.optString("doc")).split(',').map { it.trim() }.filter { it.isNotEmpty() }
+        val document = documents.joinToString(",")
         val clientIp = source.optString("clientIp", source.optString("ip")).trim()
         val server = source.optString("server").trim()
         val name = source.optString("name", "PaperFlux").trim().ifBlank { "PaperFlux" }
         check(id.matches(Regex("[1-9][0-9]*"))) { "В конфиге нет ID профиля" }
         check(token.length >= 32) { "Нужен токен доступа не короче 32 символов" }
-        check(document.startsWith("https://disk.yandex.ru/")) { "Некорректная ссылка Yandex Docs" }
+        check(documents.isNotEmpty() && documents.size <= 2 && documents.all { it.startsWith("https://disk.yandex.ru/") }) { "Укажите одну или две ссылки Yandex Docs" }
         check(clientIp.matches(Regex("10\\.10\\.10\\.(?:[1-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-4])"))) { "Некорректный виртуальный IP" }
         return org.json.JSONObject().put("id", id).put("token", token).put("clientIp", clientIp)
-            .put("documentUrl", document).put("server", server).put("name", name)
+            .put("documentUrl", document).put("documentUrls", org.json.JSONArray(documents)).put("server", server).put("name", name)
     }
 
     private fun importProfileConfig(value: String): String = try {
@@ -294,7 +299,8 @@ class MainActivity : AppCompatActivity() {
             val server = value.optString("server").trim()
             val token = value.optString("token").trim()
             check(id.matches(Regex("[1-9][0-9]*"))) { "Укажите ID профиля" }
-            check(document.startsWith("https://disk.yandex.ru/")) { "Укажите ссылку Yandex Docs" }
+            val documents = document.split(',').map { it.trim() }.filter { it.isNotEmpty() }
+            check(documents.isNotEmpty() && documents.size <= 2 && documents.all { it.startsWith("https://disk.yandex.ru/") }) { "Укажите одну или две ссылки Yandex Docs" }
             check(clientIp.matches(Regex("10\\.10\\.10\\.(?:[1-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-4])"))) { "Укажите виртуальный IP" }
             val store = ProfileStore(this@MainActivity)
             val state = org.json.JSONObject(store.publicState())
