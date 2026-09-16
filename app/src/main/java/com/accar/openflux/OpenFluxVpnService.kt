@@ -67,6 +67,8 @@ class OpenFluxVpnService : VpnService() {
     @Volatile private var lastNativeStatsAt = 0L
     private val nativeStatsPattern = Regex("\\[PAPERFLUX_STATS\\] rx=(\\d+) tx=(\\d+) ping=(\\d+)")
     private val laneStatusPattern = Regex("\\[PAPERFLUX_LANES\\] ready=(\\d+)/(\\d+)")
+    @Volatile private var readyDocumentLanes = 0
+    @Volatile private var totalDocumentLanes = 1
     private val networkCallback = object : ConnectivityManager.NetworkCallback() {
         override fun onAvailable(network: android.net.Network) {
             if (wantsConnection() && !tunnelRunning && !starting) scheduleReconnect("Сеть доступна. Восстанавливаем защищённый канал", immediate = true)
@@ -217,6 +219,8 @@ class OpenFluxVpnService : VpnService() {
 							lanesMatch?.let { m ->
 								val ready = m.groupValues[1].toInt()
 								val total = m.groupValues[2].toInt()
+								readyDocumentLanes = ready
+								totalDocumentLanes = total
 								if (ready > 0 && tunnelRunning && !stopping) {
 									publishEvent("[TRANSPORT] Доступно каналов Yandex Docs: $ready из $total")
 								}
@@ -246,13 +250,22 @@ class OpenFluxVpnService : VpnService() {
                                 publish("RECONNECTING", "Нет ответа через защищённый канал")
                                 scheduleFullRecovery("Защищённая сессия не восстановилась")
                             }
-                            if (current() && (safe.contains("Yandex transport lost") || safe.contains("WebSocket write failed"))) {
-                                nativeAuthenticated = false
-                                nativeTunnelReady = false
-                                publish("RECONNECTING", "Связь с Yandex Docs прервана. Восстанавливаем соединение")
-                                scheduleFullRecovery("Yandex Docs не восстановил соединение")
+							val singleLaneRotation = totalDocumentLanes > 1 && readyDocumentLanes > 0 &&
+								(safe.contains("Yandex transport lost") || safe.contains("WebSocket write failed"))
+							if (current() && (safe.contains("Yandex transport lost") || safe.contains("WebSocket write failed"))) {
+								// A multi-document tunnel remains usable while at least one
+								// document lane is authenticated. Do not tear down its TUN or
+								// replace the native process because one lane rotates.
+								if (totalDocumentLanes > 1 && readyDocumentLanes > 0) {
+									publishEvent("[TRANSPORT] Один канал Yandex Docs восстанавливается; туннель продолжает работать")
+								} else {
+									nativeAuthenticated = false
+									nativeTunnelReady = false
+									publish("RECONNECTING", "Связь с Yandex Docs прервана. Восстанавливаем соединение")
+									scheduleFullRecovery("Yandex Docs не восстановил соединение")
+								}
                             }
-                            if (shouldPublishNativeEvent(safe)) publishEvent(safe)
+							if (shouldPublishNativeEvent(safe) && !singleLaneRotation) publishEvent(safe)
                         }
                     }
                 } catch (e: IOException) {
