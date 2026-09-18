@@ -138,6 +138,10 @@ class MainActivity : AppCompatActivity() {
             settings.domStorageEnabled = true
             settings.allowFileAccess = true
             settings.allowContentAccess = true
+            settings.setSupportZoom(false)
+            settings.builtInZoomControls = false
+            settings.displayZoomControls = false
+            settings.textZoom = 100
             setBackgroundColor(Color.rgb(8, 7, 13))
             webViewClient = object : WebViewClient() {
                 override fun onPageFinished(view: WebView, url: String) {
