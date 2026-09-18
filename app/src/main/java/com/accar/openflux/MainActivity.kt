@@ -256,7 +256,7 @@ class MainActivity : AppCompatActivity() {
         documents.isNotEmpty() && documents.size <= 2 && documents.all { url ->
             runCatching {
                 val uri = android.net.Uri.parse(url)
-                uri.scheme == "https" && uri.host in setOf("disk.yandex.ru", "docs.yandex.ru") && !uri.path.isNullOrBlank()
+                uri.scheme == "https" && uri.host == "disk.yandex.ru" && !uri.path.isNullOrBlank()
             }.getOrDefault(false)
         }
 
