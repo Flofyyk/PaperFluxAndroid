@@ -226,14 +226,14 @@ class MainActivity : AppCompatActivity() {
         val token = source.optString("token").trim()
         val documents = source.optJSONArray("documentUrls")?.let { values ->
             (0 until values.length()).map { values.optString(it).trim() }.filter { it.isNotEmpty() }
-        } ?: source.optString("documentUrl", source.optString("doc")).split(',').map { it.trim() }.filter { it.isNotEmpty() }
+        } ?: splitDocumentUrls(source.optString("documentUrl", source.optString("doc")))
         val document = documents.joinToString(",")
         val clientIp = source.optString("clientIp", source.optString("ip")).trim()
         val server = source.optString("server").trim()
         val name = source.optString("name", "PaperFlux").trim().ifBlank { "PaperFlux" }
         check(id.matches(Regex("[1-9][0-9]*"))) { "В конфиге нет ID профиля" }
         check(token.length >= 32) { "Нужен токен доступа не короче 32 символов" }
-        check(documents.isNotEmpty() && documents.size <= 2 && documents.all { it.startsWith("https://disk.yandex.ru/") }) { "Укажите одну или две ссылки Yandex Docs" }
+        check(validDocumentUrls(documents)) { "Укажите одну или две ссылки Yandex Docs" }
         check(clientIp.matches(Regex("10\\.10\\.10\\.(?:[1-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-4])"))) { "Некорректный виртуальный IP" }
         return org.json.JSONObject().put("id", id).put("token", token).put("clientIp", clientIp)
             .put("documentUrl", document).put("documentUrls", org.json.JSONArray(documents)).put("server", server).put("name", name)
@@ -247,6 +247,18 @@ class MainActivity : AppCompatActivity() {
     } catch (e: Exception) {
         "Ошибка импорта: ${e.message ?: "неверный формат"}"
     }
+
+    /** Manual input often arrives as two lines or is copied with semicolons. */
+    private fun splitDocumentUrls(value: String): List<String> =
+        value.split(Regex("[;,\\n\\r]+")).map { it.trim() }.filter { it.isNotEmpty() }.distinct()
+
+    private fun validDocumentUrls(documents: List<String>): Boolean =
+        documents.isNotEmpty() && documents.size <= 2 && documents.all { url ->
+            runCatching {
+                val uri = android.net.Uri.parse(url)
+                uri.scheme == "https" && uri.host in setOf("disk.yandex.ru", "docs.yandex.ru") && !uri.path.isNullOrBlank()
+            }.getOrDefault(false)
+        }
 
     private inner class PaperFluxBridge {
         private fun requireIdle() = requireProfilesIdle()
@@ -299,19 +311,21 @@ class MainActivity : AppCompatActivity() {
             val server = value.optString("server").trim()
             val token = value.optString("token").trim()
             check(id.matches(Regex("[1-9][0-9]*"))) { "Укажите ID профиля" }
-            val documents = document.split(',').map { it.trim() }.filter { it.isNotEmpty() }
-            check(documents.isNotEmpty() && documents.size <= 2 && documents.all { it.startsWith("https://disk.yandex.ru/") }) { "Укажите одну или две ссылки Yandex Docs" }
+            val documents = splitDocumentUrls(document)
+            check(validDocumentUrls(documents)) { "Укажите одну или две ссылки Yandex Docs" }
             check(clientIp.matches(Regex("10\\.10\\.10\\.(?:[1-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-4])"))) { "Укажите виртуальный IP" }
             val store = ProfileStore(this@MainActivity)
             val state = org.json.JSONObject(store.publicState())
             val exists = (0 until state.getJSONArray("profiles").length()).any { state.getJSONArray("profiles").getJSONObject(it).optString("id") == id }
             if (exists) {
-                store.update(id, name, server, document, clientIp, token.ifBlank { null })
+                store.update(id, name, server, documents.joinToString(","), clientIp, token.ifBlank { null })
                 "Профиль сохранён"
             } else {
+                check(server.isNotBlank()) { "Укажите адрес сервера профиля" }
                 check(token.length >= 32) { "Для нового профиля укажите токен доступа" }
                 store.save(org.json.JSONObject().put("id", id).put("name", name).put("server", server)
-                    .put("documentUrl", document).put("clientIp", clientIp).put("token", token))
+                    .put("documentUrl", documents.joinToString(",")).put("documentUrls", org.json.JSONArray(documents))
+                    .put("clientIp", clientIp).put("token", token))
                 "Профиль создан и выбран"
             }
         } catch (e: Exception) { "Ошибка профиля: ${e.message ?: "проверьте поля"}" }
