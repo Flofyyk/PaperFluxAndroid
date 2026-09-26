@@ -8,7 +8,7 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/Android-8%2B-3ddc84?style=flat-square&logo=android&logoColor=white" alt="Android 8+">
-  <img src="https://img.shields.io/badge/ABI-arm64--v8a-6f42c1?style=flat-square" alt="arm64-v8a">
+  <img src="https://img.shields.io/badge/ABI-ARM64%20%C2%B7%20ARMv7%20%C2%B7%20x86%20%C2%B7%20x86__64-6f42c1?style=flat-square" alt="ARM64, ARMv7, x86, x86_64">
   <img src="https://img.shields.io/badge/license-GPL--3.0-orange?style=flat-square" alt="GPL-3.0">
 </p>
 
@@ -16,7 +16,7 @@
 
 PaperFlux Android is a VPN client that connects to a PaperFlux server through Yandex Docs. It includes connection profiles, per-app exclusions, traffic statistics and an event journal.
 
-To connect, add your profile by importing a configuration from the clipboard or a file, or enter the parameters manually. The profile supplies the server and document URL.
+To connect, scan a QR code with the built-in camera scanner, import a configuration from the clipboard or a file, or enter the parameters manually. The profile supplies the server and document URL.
 
 ## Interface
 
@@ -31,7 +31,8 @@ To connect, add your profile by importing a configuration from the clipboard or 
 ## Features
 
 - Android VPN service with session traffic counters and a persistent event journal.
-- Profiles with selection, editing and deletion; import from clipboard, file or manual entry.
+- Profiles with selection, editing and deletion; QR, clipboard and file import or manual entry.
+- An in-app QR scanner with a flashlight. Decoding is local, without Google Lens or Google Play Services; images are neither stored nor uploaded.
 - Per-app exclusions: selected applications bypass the VPN. Reconnect after changing the list.
 - Yandex Docs transport with authenticated tunnel readiness checks and reconnection handling.
 - Foreground notification with connection state, traffic totals and a disconnect action.
@@ -40,15 +41,27 @@ To connect, add your profile by importing a configuration from the clipboard or 
 ## Requirements
 
 - Android 8.0 or later.
-- ARM64 processor (`arm64-v8a`).
+- `arm64-v8a`, `armeabi-v7a`, `x86`, or `x86_64` architecture.
 - A compatible PaperFlux server and a valid connection profile.
 
 [Download APK releases](https://github.com/Flofyyk/PaperFluxAndroid/releases)
 
+Choose **universal** if unsure about your device architecture. Architecture-specific APKs provide the same features in a smaller download. ARM64 has been tested on a physical device; other ABIs have build and packaging checks only.
+
+## Transports and recovery
+
+Android 0.4.14 requires PaperFlux Server 0.5.6 with `--session`; update both sides. Session uses batched/zstd and is not interchangeable with the legacy PFS2 protocol.
+
+The interface lists Yandex once, alongside Cups.online and Mail.ru Docs. Imported profiles retain their underlying Yandex protocol type. Volga profiles still require a separate empty document because that transport modifies document content.
+
+Manual Yandex verification buttons have been removed from the interface and notification. Internal cookie/service authorization compatibility remains, but Session does not bypass Yandex CAPTCHA requirements: an access challenge may prevent a connection until resolved. The service channel is not used for regular VPN traffic. See [server transport configuration](https://github.com/Flofyyk/PaperFlux/blob/main/docs/TRANSPORTS.md).
+
+A restored document channel triggers an immediate DNS/TCP check. Restarted servers must answer a fresh cryptographic challenge before replacing the peer session. Brief interruptions no longer force an unnecessary VPN restart, and repeated service starts preserve foreground status.
+
 ## Installation and connection
 
 1. Download the APK from the [latest release](https://github.com/Flofyyk/PaperFluxAndroid/releases/latest) and install it.
-2. Open Profiles and import a configuration from the clipboard or a file, or enter it manually.
+2. Open Profiles and scan a QR code, import a configuration from the clipboard or a file, or enter it manually.
 3. Select a profile and tap the connect button on the home screen.
 4. On first connection, approve the Android VPN permission dialog.
 
@@ -58,11 +71,11 @@ The matching server source is in [PaperFlux Server](https://github.com/Flofyyk/P
 
 ## Build from source
 
-Requirements: Android SDK 35, JDK 17, and Android NDK 27.0.12077973 or newer when rebuilding native code.
+Requirements: Android SDK 35, JDK 17+, and Node.js 20.19+ or 22.12+. UI sources are included in `web/`; Gradle installs locked dependencies and builds them. Four native ABI binaries are included. Rebuilding them requires Go 1.26.4+ and NDK 27.0.12077973+, using `scripts/build-android-native.ps1` in the server repository.
 
 ```bash
 ./gradlew :app:assembleDebug
-adb install -r app/build/outputs/apk/debug/app-debug.apk
+adb install -r app/build/outputs/apk/debug/app-universal-debug.apk
 ```
 
 ## Disclaimer

@@ -1,0 +1,13 @@
+PaperFlux Android is based on p1neappleXpress/OpenFlux and distributed under
+GPL-3.0-or-later. See LICENSE and the server repository for native dependencies.
+https://github.com/p1neappleXpress/OpenFlux
+https://github.com/Flofyyk/PaperFlux/blob/main/NOTICE
+
+Web interface dependencies include React, React DOM, lucide-react, clsx,
+tailwind-merge, and framer-motion (MIT licenses). Their license notices are
+included in app/src/main/assets/licenses. Versions are locked in
+web/package-lock.json. Native dependency licenses are included there too.
+
+The Android build also uses AndroidX, Material Components, OkHttp,
+ZXing Android Embedded and ZXing core (Apache-2.0). QR decoding is local
+and does not use the Google Play Services scanner.

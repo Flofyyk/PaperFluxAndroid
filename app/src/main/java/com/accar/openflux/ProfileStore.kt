@@ -60,6 +60,7 @@ class ProfileStore(private val context: Context) {
         val docs = documents(value)
         value.put("documentUrls", docs)
         value.put("documentUrl", (0 until docs.length()).joinToString(",") { docs.getString(it) })
+        value.put("transport", value.optString("transport", "yandex").ifBlank { "yandex" })
         return value
     }
     fun migrate() {
@@ -99,7 +100,7 @@ class ProfileStore(private val context: Context) {
         write(data.put("activeId", id))
         mirror(profile)
     }
-    fun update(id: String, name: String, server: String, documentUrl: String, clientIp: String, replacementToken: String?) {
+    fun update(id: String, name: String, server: String, documentUrl: String, clientIp: String, provider: String, replacementToken: String?) {
         val data = read()
         val rows = data.getJSONArray("profiles")
         val next = JSONArray()
@@ -112,7 +113,7 @@ class ProfileStore(private val context: Context) {
             }
             val edited = JSONObject(current.toString()).put("name", name).put("server", server)
             edited.remove("documentUrls")
-            edited.put("documentUrl", documentUrl).put("clientIp", clientIp)
+            edited.put("documentUrl", documentUrl).put("clientIp", clientIp).put("transport", provider)
             val value = canonical(edited)
             replacementToken?.takeIf { it.isNotBlank() }?.let { value.put("token", it) }
             updated = value

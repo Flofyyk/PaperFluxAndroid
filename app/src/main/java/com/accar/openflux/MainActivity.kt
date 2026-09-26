@@ -48,6 +48,7 @@ import java.util.Date
 import java.util.Locale
 import java.text.Collator
 import java.io.ByteArrayOutputStream
+import java.security.SecureRandom
 
 class MainActivity : AppCompatActivity() {
     private var designWeb: WebView? = null
@@ -91,6 +92,13 @@ class MainActivity : AppCompatActivity() {
     }
     private val notificationPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) {
         startOpenFlux()
+    }
+    private val qrScanner = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { scanned ->
+        val message = if (scanned.resultCode == RESULT_OK) {
+            val text = scanned.data?.getStringExtra(QrScanActivity.EXTRA_CONTENT).orEmpty()
+            runCatching { importProfileConfig(text) }.getOrElse { "Не удалось импортировать QR-код" }
+        } else scanned.data?.getStringExtra(QrScanActivity.EXTRA_ERROR) ?: "Сканирование отменено"
+        designWeb?.evaluateJavascript("window.__paperFluxOnProfileFile&&window.__paperFluxOnProfileFile(${org.json.JSONObject.quote(message)})", null)
     }
     private val profileFilePicker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         val result = if (uri == null) {
@@ -221,6 +229,7 @@ class MainActivity : AppCompatActivity() {
                 .put("token", uri.getQueryParameter("token"))
                 .put("clientIp", uri.getQueryParameter("ip"))
                 .put("documentUrl", uri.getQueryParameter("doc"))
+                .put("transport", uri.getQueryParameter("transport") ?: "yandex")
                 .put("server", uri.getQueryParameter("server"))
                 .put("name", uri.getQueryParameter("name") ?: "PaperFlux")
         } else {
@@ -235,12 +244,14 @@ class MainActivity : AppCompatActivity() {
         val clientIp = source.optString("clientIp", source.optString("ip")).trim()
         val server = source.optString("server").trim()
         val name = source.optString("name", "PaperFlux").trim().ifBlank { "PaperFlux" }
+        val provider = source.optString("transport", "yandex").ifBlank { "yandex" }
         check(id.matches(Regex("[1-9][0-9]*"))) { "В конфиге нет ID профиля" }
         check(token.length >= 32) { "Нужен токен доступа не короче 32 символов" }
-        check(validDocumentUrls(documents)) { "Укажите одну или две ссылки Yandex Docs" }
+        check(validResource(provider, documents)) { "Проверьте ссылку или комнаты выбранного транспорта" }
+        check(server.isNotBlank()) { "В конфиге нет адреса сервера" }
         check(clientIp.matches(Regex("10\\.10\\.10\\.(?:[1-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-4])"))) { "Некорректный виртуальный IP" }
         return org.json.JSONObject().put("id", id).put("token", token).put("clientIp", clientIp)
-            .put("documentUrl", document).put("documentUrls", org.json.JSONArray(documents)).put("server", server).put("name", name)
+            .put("documentUrl", document).put("documentUrls", org.json.JSONArray(documents)).put("server", server).put("name", name).put("transport", provider)
     }
 
     private fun importProfileConfig(value: String): String = try {
@@ -260,9 +271,26 @@ class MainActivity : AppCompatActivity() {
         documents.isNotEmpty() && documents.size <= 2 && documents.all { url ->
             runCatching {
                 val uri = android.net.Uri.parse(url)
-                uri.scheme == "https" && uri.host == "disk.yandex.ru" && !uri.path.isNullOrBlank()
+                uri.scheme == "https" && uri.host == "disk.yandex.ru" && uri.userInfo == null && uri.port == -1 && !uri.path.isNullOrBlank()
             }.getOrDefault(false)
         }
+
+    private fun validResource(provider: String, resources: List<String>): Boolean = when (provider) {
+        "yandex" -> validDocumentUrls(resources)
+        "vyandex" -> resources.size == 1 && validDocumentUrls(resources)
+        "mailru" -> resources.size == 1 && runCatching {
+            val uri = android.net.Uri.parse(resources[0])
+            uri.scheme == "https" && uri.host == "cloud.mail.ru" && uri.path?.startsWith("/public/") == true
+        }.getOrDefault(false)
+        "cupsonline" -> resources.size == 1 && runCatching {
+            val bytes = Base64.decode(resources[0], Base64.URL_SAFE or Base64.NO_PADDING or Base64.NO_WRAP)
+            val rooms = org.json.JSONArray(String(bytes, Charsets.UTF_8))
+            rooms.length() in 1..8 && (0 until rooms.length()).all {
+                rooms.getString(it).matches(Regex("[0-9a-fA-F-]{36}"))
+            }
+        }.getOrDefault(false)
+        else -> false
+    }
 
     private inner class PaperFluxBridge {
         private fun requireIdle() = requireProfilesIdle()
@@ -302,6 +330,14 @@ class MainActivity : AppCompatActivity() {
         @JavascriptInterface fun importConfig(value: String): String {
             return importProfileConfig(value)
         }
+        @JavascriptInterface fun generateProfileToken(): String {
+            val bytes = ByteArray(32)
+            SecureRandom().nextBytes(bytes)
+            return Base64.encodeToString(bytes, Base64.URL_SAFE or Base64.NO_PADDING or Base64.NO_WRAP)
+        }
+        @JavascriptInterface fun scanQr() = runOnUiThread {
+            qrScanner.launch(Intent(this@MainActivity, QrScanActivity::class.java))
+        }
         @JavascriptInterface fun pickConfigFile() = runOnUiThread {
             profileFilePicker.launch(arrayOf("text/plain", "application/json", "application/octet-stream"))
         }
@@ -314,22 +350,23 @@ class MainActivity : AppCompatActivity() {
             val clientIp = value.optString("clientIp").trim()
             val server = value.optString("server").trim()
             val token = value.optString("token").trim()
+            val provider = value.optString("transport", "yandex").ifBlank { "yandex" }
             check(id.matches(Regex("[1-9][0-9]*"))) { "Укажите ID профиля" }
             val documents = splitDocumentUrls(document)
-            check(validDocumentUrls(documents)) { "Укажите одну или две ссылки Yandex Docs" }
+            check(validResource(provider, documents)) { "Проверьте ссылку или комнаты выбранного транспорта" }
             check(clientIp.matches(Regex("10\\.10\\.10\\.(?:[1-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-4])"))) { "Укажите виртуальный IP" }
             val store = ProfileStore(this@MainActivity)
             val state = org.json.JSONObject(store.publicState())
             val exists = (0 until state.getJSONArray("profiles").length()).any { state.getJSONArray("profiles").getJSONObject(it).optString("id") == id }
             if (exists) {
-                store.update(id, name, server, documents.joinToString(","), clientIp, token.ifBlank { null })
+                store.update(id, name, server, documents.joinToString(","), clientIp, provider, token.ifBlank { null })
                 "Профиль сохранён"
             } else {
                 check(server.isNotBlank()) { "Укажите адрес сервера профиля" }
-                check(token.length >= 32) { "Для нового профиля укажите токен доступа" }
+                check(token.length >= 32) { "Для нового профиля нужен ключ доступа" }
                 store.save(org.json.JSONObject().put("id", id).put("name", name).put("server", server)
                     .put("documentUrl", documents.joinToString(",")).put("documentUrls", org.json.JSONArray(documents))
-                    .put("clientIp", clientIp).put("token", token))
+                    .put("clientIp", clientIp).put("token", token).put("transport", provider))
                 "Профиль создан и выбран"
             }
         } catch (e: Exception) { "Ошибка профиля: ${e.message ?: "проверьте поля"}" }
@@ -580,7 +617,8 @@ class MainActivity : AppCompatActivity() {
             .apply()
         val link = if (::transportLink.isInitialized) transportLink.text?.toString()?.trim().orEmpty()
         else getSharedPreferences(OpenFluxVpnService.PREFS, MODE_PRIVATE).getString("document", "").orEmpty()
-        if (!link.startsWith("https://")) {
+        val provider = ProfileStore(this).active()?.optString("transport", "yandex") ?: "yandex"
+        if (!validResource(provider, splitDocumentUrls(link))) {
             getSharedPreferences(OpenFluxVpnService.PREFS, MODE_PRIVATE).edit().putString("state", "DISCONNECTED").apply()
             sendWebState("ERROR", "Добавьте профиль перед подключением")
             return

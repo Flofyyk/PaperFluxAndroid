@@ -1,0 +1,165 @@
+import { useCallback, useEffect, useState } from "react";
+import type { AppExceptionItem, PaperFluxProfile, TabId, VpnSettings } from "./types";
+import { DEFAULT_APPS, DEFAULT_SETTINGS } from "./data/defaults";
+import { useVpn } from "./hooks/useVpn";
+import { ToastProvider } from "./hooks/useToast";
+
+import { BottomNav } from "./components/shell/BottomNav";
+
+import { HomeScreen } from "./screens/HomeScreen";
+import { LogsScreen } from "./screens/LogsScreen";
+import { SettingsScreen } from "./screens/SettingsScreen";
+import { ProfilesScreen } from "./screens/ProfilesScreen";
+
+export default function App() {
+  const [dark] = useState(true);
+  const [activeTab, setActiveTab] = useState<TabId>("home");
+
+  const [settings, setSettings] = useState<VpnSettings>(DEFAULT_SETTINGS);
+  const [apps, setApps] = useState<AppExceptionItem[]>(DEFAULT_APPS);
+  const [profiles, setProfiles] = useState<PaperFluxProfile[]>([]);
+  const [activeProfile, setActiveProfile] = useState("");
+
+  const refreshProfiles = useCallback(() => {
+    const native = (window as unknown as { PaperFluxNative?: { getProfiles?: () => string } }).PaperFluxNative;
+    if (!native?.getProfiles) return;
+    const snapshot = JSON.parse(native.getProfiles()) as { profiles: PaperFluxProfile[]; activeId: string };
+    setProfiles(snapshot.profiles); setActiveProfile(snapshot.activeId);
+    setSettings(previous => ({ ...previous, documentUrl: snapshot.profiles.find(p => p.id === snapshot.activeId)?.documentUrl ?? "" }));
+  }, []);
+  useEffect(() => { refreshProfiles(); }, []);
+  const changeProfile = useCallback((id: string, remove = false): string => {
+    const native = (window as unknown as { PaperFluxNative?: { selectProfile?: (id: string) => string; deleteProfile?: (id: string) => string } }).PaperFluxNative;
+    const result = (remove ? native?.deleteProfile?.(id) : native?.selectProfile?.(id)) ?? "Android-мост недоступен";
+    refreshProfiles();
+    return result;
+  }, [refreshProfiles]);
+
+  useEffect(() => {
+    const native = (window as unknown as { PaperFluxNative?: { getDocumentUrl?: () => string } }).PaperFluxNative;
+    try {
+      const documentUrl = native?.getDocumentUrl?.();
+      if (documentUrl) setSettings((previous) => ({ ...previous, documentUrl }));
+    } catch { /* preview */ }
+  }, []);
+  useEffect(() => {
+    const native = (window as unknown as { PaperFluxNative?: { getAutoReconnect?: () => boolean } }).PaperFluxNative;
+    try {
+      const autoReconnect = native?.getAutoReconnect?.();
+      if (typeof autoReconnect === "boolean") setSettings((previous) => ({ ...previous, autoReconnect }));
+    } catch { /* preview */ }
+  }, []);
+
+  const addProfileFromClipboard = useCallback(() => {
+    const native = (window as unknown as { PaperFluxNative?: { getClipboardConfig?: () => string; importConfig?: (v: string) => string; getDocumentUrl?: () => string } }).PaperFluxNative;
+    const result = native?.importConfig?.(native?.getClipboardConfig?.() ?? "") ?? "Буфер обмена недоступен";
+    if (result.startsWith("Профиль добавлен")) {
+      refreshProfiles();
+    }
+    return result;
+  }, [refreshProfiles]);
+  const pickProfileFile = useCallback(() => {
+    (window as unknown as { PaperFluxNative?: { pickConfigFile?: () => void } }).PaperFluxNative?.pickConfigFile?.();
+  }, []);
+  const scanProfileQr = useCallback(() => {
+    (window as unknown as { PaperFluxNative?: { scanQr?: () => void } }).PaperFluxNative?.scanQr?.();
+  }, []);
+  const saveProfile = useCallback((raw: string): string => {
+    const native = (window as unknown as { PaperFluxNative?: { updateProfile?: (value: string) => string } }).PaperFluxNative;
+    const result = native?.updateProfile?.(raw) ?? "Android-мост недоступен";
+    if (result.startsWith("Профиль сохранён") || result.startsWith("Профиль создан")) refreshProfiles();
+    return result;
+  }, [refreshProfiles]);
+
+  useEffect(() => {
+    if (activeTab !== "settings") return;
+    const native = (window as unknown as { PaperFluxNative?: { getInstalledApps?: () => string } }).PaperFluxNative;
+    if (!native?.getInstalledApps) return;
+    // Icon extraction is CPU-heavy on Android. Defer it until after the first
+    // frame so the home screen is rendered immediately on cold start.
+    const loadApps = () => {
+      try {
+        const parsed = JSON.parse(native.getInstalledApps!());
+        if (Array.isArray(parsed) && parsed.length) setApps(parsed);
+      } catch { /* native bridge unavailable during preview */ }
+    };
+    // First response is deliberately icon-free; two light retries replace it
+    // with the background-cached icon set without freezing Settings.
+    const timers = [180, 800, 1800].map((delay) => window.setTimeout(loadApps, delay));
+    return () => timers.forEach(window.clearTimeout);
+  }, [activeTab]);
+
+  const vpn = useVpn({ autoReconnect: settings.autoReconnect, timeoutSec: settings.connectTimeoutSec });
+
+  const updateSetting = useCallback(<K extends keyof VpnSettings,>(key: K, value: VpnSettings[K]) => {
+    setSettings((prev) => ({ ...prev, [key]: value }));
+    if (key === "documentUrl") {
+      (window as unknown as { PaperFluxNative?: { setDocumentUrl?: (url: string) => void } }).PaperFluxNative?.setDocumentUrl?.(value as string);
+    }
+    if (key === "autoReconnect") {
+      (window as unknown as { PaperFluxNative?: { setAutoReconnect?: (enabled: boolean) => void } }).PaperFluxNative?.setAutoReconnect?.(value as boolean);
+    }
+  }, []);
+
+  const toggleApp = useCallback((id: string, value: boolean) => {
+    setApps((prev) => {
+      const next = prev.map((a) => (a.id === id ? { ...a, excluded: value } : a));
+      const native = (window as unknown as { PaperFluxNative?: { setExcludedApps?: (raw: string) => void } }).PaperFluxNative;
+      native?.setExcludedApps?.(JSON.stringify(next.filter((a) => a.excluded).map((a) => a.pkg)));
+      return next;
+    });
+  }, []);
+
+  const resetSettings = useCallback(() => {
+    setSettings(DEFAULT_SETTINGS);
+    setApps(DEFAULT_APPS);
+    const native = (window as unknown as { PaperFluxNative?: { setExcludedApps?: (raw: string) => void } }).PaperFluxNative;
+    native?.setExcludedApps?.("[]");
+    (window as unknown as { PaperFluxNative?: { setAutoReconnect?: (enabled: boolean) => void } }).PaperFluxNative?.setAutoReconnect?.(DEFAULT_SETTINGS.autoReconnect);
+  }, []);
+
+  const handleToggleConnection = useCallback(() => {
+    if (vpn.status === "idle" || vpn.status === "error") {
+      vpn.connect();
+    } else if (vpn.status === "connected") {
+      vpn.disconnect();
+    } else if (vpn.status === "connecting" || vpn.status === "reconnecting") {
+      vpn.disconnect();
+    }
+  }, [vpn.connect, vpn.disconnect, vpn.status]);
+
+  return (
+    <div className={dark ? "pf-dark pf-app-shell w-full" : "pf-app-shell w-full"}>
+      <div className={dark ? "pf-app-frame flex w-full flex-col overflow-hidden bg-[#08070d] text-slate-100" : "pf-app-frame flex w-full flex-col overflow-hidden bg-[#fbfaff] text-slate-900"}>
+        <ToastProvider>
+          <div className="min-h-0 flex-1 overflow-hidden">
+            {activeTab === "home" && (
+              <HomeScreen
+                status={vpn.status}
+                stages={vpn.stages}
+                stats={vpn.stats}
+                errorReason={vpn.errorReason}
+                profile={profiles.find((profile) => profile.id === activeProfile)}
+                onOpenProfiles={() => setActiveTab("profiles")}
+                onToggleConnection={handleToggleConnection}
+                onRetry={vpn.retry}
+              />
+            )}
+            {activeTab === "logs" && <LogsScreen logs={vpn.logs} onClear={vpn.clearLogs} />}
+            {activeTab === "profiles" && <ProfilesScreen profiles={profiles} activeId={activeProfile} onClipboard={addProfileFromClipboard} onPickFile={pickProfileFile} onQr={scanProfileQr} onSave={saveProfile} onSelect={id => changeProfile(id)} onDelete={id => changeProfile(id, true)} onRefresh={refreshProfiles} />}
+            {activeTab === "settings" && (
+              <SettingsScreen
+                settings={settings}
+                onUpdate={updateSetting}
+                apps={apps}
+                onToggleApp={toggleApp}
+                onReset={resetSettings}
+              />
+            )}
+          </div>
+          <BottomNav active={activeTab} onChange={setActiveTab} />
+        </ToastProvider>
+      </div>
+    </div>
+  );
+}

@@ -11,3 +11,6 @@ captures/
 *.log
 *.apk
 *.err
+web/node_modules/
+web/dist/
+*.hprof

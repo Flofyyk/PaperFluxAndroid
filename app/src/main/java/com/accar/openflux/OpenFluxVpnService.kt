@@ -50,6 +50,7 @@ class OpenFluxVpnService : VpnService() {
     private val workerProcesses = Collections.synchronizedList(mutableListOf<Process>())
     private val workerSockets = Collections.synchronizedList(mutableListOf<Socket>())
     @Volatile private var nativeAuthenticated = false
+    @Volatile private var authActionRequired: String? = null
     @Volatile private var nativeTunnelReady = false
     @Volatile private var stopping = false
     @Volatile private var starting = false
@@ -97,22 +98,39 @@ class OpenFluxVpnService : VpnService() {
         // Restore the user's explicit intent, not the short-lived UI state.
         if (intent?.action != START) {
             val prefs = preferences()
-            if (prefs.getBoolean(DESIRED_ACTIVE, false) && !starting && !tunnelRunning) {
-                documentUrl = prefs.getString("document", documentUrl) ?: documentUrl
-                scheduleReconnect("Восстанавливаем фоновое подключение", immediate = true)
+            if (prefs.getBoolean(DESIRED_ACTIVE, false)) {
+                // A sticky recreation must become foreground before a network
+                // callback or the worker starts any lengthy recovery work.
+                startForeground(NOTIFICATION_ID, notification("PaperFlux: восстановление соединения"))
+                if (!starting && !tunnelRunning) {
+                    documentUrl = prefs.getString("document", documentUrl) ?: documentUrl
+                    scheduleReconnect("Восстанавливаем фоновое подключение", immediate = true)
+                }
+                return START_STICKY
             }
-            return START_STICKY
-        }
-        if (starting || tunnelRunning) return START_NOT_STICKY
-        val resuming = intent.getBooleanExtra(EXTRA_RESUME, false)
-        preferences().edit().putBoolean(DESIRED_ACTIVE, true).apply()
-        starting = true
-        documentUrl = intent?.getStringExtra(EXTRA_DOCUMENT_URL)?.takeIf { it.startsWith("https://") } ?: documentUrl
-        if (documentUrl.isBlank()) {
-            starting = false
-            publish("ERROR", "Добавьте профиль PaperFlux перед подключением")
+            stopSelf(startId)
             return START_NOT_STICKY
         }
+        // Fulfil every startForegroundService request, including a duplicate
+        // START. Never leave Android's foreground deadline pending on an early
+        // return or while profile/connection validation runs.
+        startForeground(NOTIFICATION_ID, notification(if (nativeTunnelReady) connectedNotificationText() else "PaperFlux: подключение"))
+        if (starting || tunnelRunning) return START_STICKY
+        val resuming = intent.getBooleanExtra(EXTRA_RESUME, false)
+        // Cups uses a packed room list rather than an HTTPS URL. Validation
+        // belongs to the selected profile/provider, not to this Intent string.
+        documentUrl = intent.getStringExtra(EXTRA_DOCUMENT_URL)?.trim()?.takeIf { it.isNotEmpty() }
+            ?: ProfileStore(this).active()?.optString("documentUrl").orEmpty()
+        if (documentUrl.isBlank()) {
+            preferences().edit().putBoolean(DESIRED_ACTIVE, false).apply()
+            cancelReconnects()
+            publish("ERROR", "Добавьте профиль PaperFlux перед подключением")
+            stopForeground(STOP_FOREGROUND_REMOVE)
+            stopSelf(startId)
+            return START_NOT_STICKY
+        }
+        preferences().edit().putBoolean(DESIRED_ACTIVE, true).apply()
+        starting = true
         // A deliberate START begins a new journal. A restart from the recents
         // task is the same VPN session, therefore it must keep its events and
         // counters instead of leaving the user with a single last log line.
@@ -155,6 +173,14 @@ class OpenFluxVpnService : VpnService() {
             lastNativeStatsAt = 0L
             requireValidatedNetwork()
             val identity = ProfileStore(this).active() ?: error("Добавьте действующий профиль PaperFlux")
+            val provider = identity.optString("transport", "yandex").ifBlank { "yandex" }
+            authActionRequired = null
+            check(provider in setOf("yandex", "vyandex", "cupsonline", "mailru")) { "Неизвестный транспорт профиля" }
+            val providerName = when (provider) {
+                "cupsonline" -> "Cups.online"
+                "mailru" -> "Mail.ru Документы"
+                else -> "Яндекс"
+            }
             val profileDocuments = identity.optJSONArray("documentUrls")
             documentUrl = if (profileDocuments != null) (0 until profileDocuments.length()).joinToString(",") { profileDocuments.getString(it) } else identity.getString("documentUrl")
             val profileId = identity.getString("id")
@@ -185,10 +211,20 @@ class OpenFluxVpnService : VpnService() {
             tun = builder.establish()
                 ?: error("Не удалось создать Android TUN")
             val documentUrls = documentUrl.split(',').map { it.trim() }.filter { it.isNotEmpty() }
-            check(documentUrls.isNotEmpty()) { "Не указана ссылка на Yandex Docs" }
+            check(documentUrls.isNotEmpty()) { "В профиле нет ссылки или комнат транспорта" }
+            NativeAuthBridge.applyPreflightCookies(this, profileId, provider, documentUrls)
             // One native process owns the TUN/TCP stack. Document lanes live
             // inside that process, so replies keep one shared flow table.
-            val command = mutableListOf(binary.absolutePath, "--client", "--transport", "yandex", "--urls", documentUrls.joinToString(","))
+            val command = mutableListOf(binary.absolutePath, "--client", "--transport", provider)
+            val authSocket = File(noBackupFilesDir, "control-${System.nanoTime()}.sock").absolutePath
+            command += listOf("--session", "--ipc-socket", authSocket)
+            val serverHost = identity.optString("server").trim()
+            val numericId = profileId.toIntOrNull()
+            if (serverHost.matches(Regex("[A-Za-z0-9.-]+")) && numericId != null && numericId in 1..41535) {
+                command += listOf("--auth-service", "$serverHost:${24000 + numericId}")
+            }
+            if (provider == "yandex") command += listOf("--urls", documentUrls.joinToString(","))
+            else command += listOf("--url", documentUrl)
             if (profileId.isNotBlank()) command += listOf("--profile-id", profileId)
             if (profileToken.isNotBlank()) command += listOf("--profile-token", profileToken)
             if (clientIp.isNotBlank()) command += listOf("--client-ip", clientIp)
@@ -196,18 +232,29 @@ class OpenFluxVpnService : VpnService() {
             process = ProcessBuilder(command).apply {
                 directory(filesDir); redirectErrorStream(true)
                 environment()["LD_LIBRARY_PATH"] = applicationInfo.nativeLibraryDir
+                environment()["PAPERFLUX_SESSION_COOKIES"] = File(noBackupFilesDir, "session-cookies-$profileId.json").absolutePath
             }.start()
-            publish("TRANSPORT", if (documentUrls.size == 1) "Подключаем Yandex Docs transport" else "Подключаем ${documentUrls.size} Yandex Docs канала")
+            publish("TRANSPORT", if (provider == "yandex" && documentUrls.size > 1) "Подключаем ${documentUrls.size} канала Яндекс Документов" else "Подключаем $providerName")
             // Do not leave the child pipe unread: Go debug output would fill
             // it and freeze the transport. Keeping it in logcat also makes a
             // failed Yandex handshake diagnosable without exposing it in UI.
             val child = process ?: error("Не удалось запустить OpenFlux")
+            NativeAuthBridge.start(this, authSocket, child, { current() && process === child }, { remote ->
+                authActionRequired = if (remote) "Яндекс требует подтверждение доступа на сервере" else "Яндекс требует подтверждение доступа на телефоне"
+                publish(if (tunnelRunning && nativeTunnelReady) "CONNECTED" else "TRANSPORT", authActionRequired!!)
+                updateNotification(authActionRequired!!)
+            }, { authActionRequired = null; publish(if (tunnelRunning && nativeTunnelReady) "CONNECTED" else "TRANSPORT", "Проверка сохранена. Восстанавливаем защищённый канал") })
             Thread {
                 try {
                     child.inputStream.bufferedReader().useLines { lines ->
                         lines.forEach {
                             if (process !== child || !current()) return@forEach
                             val safe = redactNativeLog(it)
+                            if (safe.contains("CAPTCHA challenge") || safe.contains("YANDEX_LOGIN_REQUIRED")) {
+                                authActionRequired = "Яндекс требует подтверждение доступа к документу"
+                            } else if (safe.contains("YANDEX_VOLGA_REQUIRED")) {
+                                authActionRequired = "Тип подключения к документу не совпадает с профилем сервера. Импортируйте актуальную конфигурацию"
+                            }
                             val statsMatch = nativeStatsPattern.find(safe)
                             // Stats are consumed by the UI but do not need to
                             // be written to Logcat on every native tick.
@@ -222,7 +269,7 @@ class OpenFluxVpnService : VpnService() {
 								readyDocumentLanes = ready
 								totalDocumentLanes = total
 								if (ready > 0 && tunnelRunning && !stopping) {
-									publishEvent("[TRANSPORT] Доступно каналов Yandex Docs: $ready из $total")
+									publishEvent("[TRANSPORT] Доступно каналов: $ready из $total")
 								}
 							}
                             // YANDEX_AUTH_OK is the last prerequisite before
@@ -230,20 +277,18 @@ class OpenFluxVpnService : VpnService() {
                             // core. PEER_READY is intentionally emitted only
                             // after that descriptor has been received, so
                             // waiting for it here creates a startup deadlock.
-                            if (current() && (safe.contains("[PAPERFLUX] YANDEX_AUTH_OK") || safe.contains("[PAPERFLUX] YANDEX_WAIT_AUTH") || safe.contains("[PAPERFLUX] PEER_READY"))) {
+                            if (current() && (safe.contains("[PAPERFLUX] YANDEX_AUTH_OK") || safe.contains("[PAPERFLUX] YANDEX_WAIT_AUTH") || safe.contains("[PAPERFLUX] TRANSPORT_AUTH_OK") || safe.contains("[PAPERFLUX] PEER_READY"))) {
                                 nativeAuthenticated = true
                             }
-                            if (current() && safe.contains("[PAPERFLUX] TUNNEL_READY")) {
+                            if (current() && (safe.contains("[PAPERFLUX] TUNNEL_READY") || safe.contains("[PAPERFLUX] TUNNEL_HEALTHY"))) {
+                                // Both signals follow a fresh real DNS-over-TCP
+                                // probe. HEALTHY must also cancel a pending full
+                                // restart after a brief peer loss.
                                 val recovered = !nativeTunnelReady
                                 nativeTunnelReady = true
                                 cancelFullRecovery()
                                 if (tunnelRunning && !stopping) TunnelSnapshot.write(this@OpenFluxVpnService, "CONNECTED", "Шифрованный туннель: DNS и TCP подтверждены")
                                 if (recovered && tunnelRunning && !stopping) publish("CONNECTED", "Шифрованный туннель: DNS и TCP подтверждены")
-                            }
-                            if (current() && safe.contains("[PAPERFLUX] TUNNEL_HEALTHY") && nativeTunnelReady && tunnelRunning) {
-                                // Refresh the cross-process snapshot without adding a
-                                // duplicate CONNECTED item to the visible journal.
-                                TunnelSnapshot.write(this@OpenFluxVpnService, "CONNECTED", "Шифрованный туннель: DNS и TCP подтверждены")
                             }
                             if (current() && (safe.contains("PEER_LOST") || safe.contains("TUNNEL_LOST"))) {
                                 nativeTunnelReady = false
@@ -257,12 +302,12 @@ class OpenFluxVpnService : VpnService() {
 								// document lane is authenticated. Do not tear down its TUN or
 								// replace the native process because one lane rotates.
 								if (totalDocumentLanes > 1 && readyDocumentLanes > 0) {
-									publishEvent("[TRANSPORT] Один канал Yandex Docs восстанавливается; туннель продолжает работать")
+									publishEvent("[TRANSPORT] Один канал восстанавливается; туннель продолжает работать")
 								} else {
 									nativeAuthenticated = false
 									nativeTunnelReady = false
-									publish("RECONNECTING", "Связь с Yandex Docs прервана. Восстанавливаем соединение")
-									scheduleFullRecovery("Yandex Docs не восстановил соединение")
+									publish("RECONNECTING", "Связь с $providerName прервана. Восстанавливаем соединение")
+									scheduleFullRecovery("Транспорт не восстановил соединение")
 								}
                             }
 							if (shouldPublishNativeEvent(safe) && !singleLaneRotation) publishEvent(safe)
@@ -271,24 +316,30 @@ class OpenFluxVpnService : VpnService() {
                 } catch (e: IOException) {
                     // destroy() closes the pipe; that is normal during a
                     // user-requested disconnect and must not crash the app.
-                    if (child.isAlive && !stopping) Log.w("OpenFluxVpn", "Native log pipe closed", e)
+                    if (child.isAlive && !stopping && current() && process === child) Log.w("OpenFluxVpn", "Native log pipe closed", e)
                 }
             }.start()
             // The native child opens its TUN-FD listener independently. A
             // short yield is enough to begin consuming auth output; the old
             // fixed quarter-second pause only delayed the visible startup.
             Thread.sleep(50)
-            publish("TRANSPORT", "Ожидаем подтверждение авторизации Яндекс Docs")
-            val authDeadline = System.currentTimeMillis() + 75_000
-            while (current() && !nativeAuthenticated && System.currentTimeMillis() < authDeadline) {
+            publish("TRANSPORT", "Ожидаем защищённое соединение через $providerName")
+            val waitStarted = android.os.SystemClock.elapsedRealtime()
+            var lastWaitTick = waitStarted
+            var networkWait = 0L
+            while (current() && !nativeAuthenticated && networkWait < 300_000 && android.os.SystemClock.elapsedRealtime() - waitStarted < 1_800_000) {
                 if (!child.isAlive) {
                     val code = runCatching { child.exitValue() }.getOrDefault(-1)
                     error("Соединение завершилось до подтверждения. Повторите попытку")
                 }
                 Thread.sleep(100)
+                val now = android.os.SystemClock.elapsedRealtime()
+                if (NativeAuthBridge.read(File(noBackupFilesDir, "auth-request.json")) == null) networkWait += now - lastWaitTick
+                lastWaitTick = now
             }
             if (!current()) return
             check(nativeAuthenticated) { "Не удалось подтвердить защищённое соединение. Проверьте профиль и повторите попытку" }
+            if (NativeAuthBridge.read(File(noBackupFilesDir, "auth-request.json")) == null) authActionRequired = null
             sendTunFd(socketName, tun!!)
             publish("DNS", "Проверяем DNS и TCP через защищённый канал")
             val tunnelDeadline = System.currentTimeMillis() + 35_000
@@ -297,7 +348,7 @@ class OpenFluxVpnService : VpnService() {
             check(nativeTunnelReady) { "Защищённый канал создан, но доступ к интернету пока не подтверждён" }
             tunnelRunning = true
             reconnectAttempt = 0
-            publish("CONNECTED", "Yandex‑туннель подтверждён. DNS и TCP готовы")
+            publish("CONNECTED", authActionRequired ?: "Защищённый туннель подтверждён. DNS и TCP готовы")
             startTrafficStats()
             startNetworkWatchdog()
             Thread {
@@ -308,7 +359,7 @@ class OpenFluxVpnService : VpnService() {
                     nativeTunnelReady = false
                     tunnelRunning = false
                     statsRunning = false
-                    publish("RECONNECTING", "Восстанавливаем соединение с Yandex Docs")
+                    publish("RECONNECTING", "Восстанавливаем соединение с $providerName")
                     // A dead child can no longer recover its TUN descriptor.
                     // Close it before retrying so Android does not keep a
                     // stale VPN icon or a black-holed default route.
@@ -323,7 +374,12 @@ class OpenFluxVpnService : VpnService() {
             startForeground(NOTIFICATION_ID, notification("PaperFlux: не удалось подключиться"))
             publish("ERROR", explainFailure(e))
             releaseTunnelResources()
-            if (wantsConnection() && autoReconnectEnabled()) scheduleReconnect(explainFailure(e))
+            if (authActionRequired != null) {
+                preferences().edit().putBoolean(DESIRED_ACTIVE, false).apply()
+                publish("ERROR", authActionRequired!!)
+                stopForeground(STOP_FOREGROUND_REMOVE)
+                stopSelf()
+            } else if (wantsConnection() && autoReconnectEnabled()) scheduleReconnect(explainFailure(e))
             else if (wantsConnection()) {
                 preferences().edit().putBoolean(DESIRED_ACTIVE, false).apply()
                 stopForeground(STOP_FOREGROUND_REMOVE)
@@ -465,6 +521,7 @@ class OpenFluxVpnService : VpnService() {
     }
     private fun releaseTunnelResources() {
         stopProcessOnly(); runCatching { tun?.close() }; tun = null
+        for (name in listOf("auth-request.json", "auth-offer.json", "auth-command.json")) File(noBackupFilesDir, name).delete()
         nativeAuthenticated = false; nativeTunnelReady = false; tunnelRunning = false
     }
     private fun stopTunnel(announce: Boolean = true, clearDesired: Boolean = true) {
@@ -614,9 +671,18 @@ class OpenFluxVpnService : VpnService() {
         fullRecoveryFuture = reconnectWorker.schedule({
             fullRecoveryScheduled.set(false)
             if (generation == recoveryGeneration.get() && wantsConnection() && autoReconnectEnabled() && !nativeTunnelReady) {
-                sessionGeneration.incrementAndGet()
+                val replacement = sessionGeneration.incrementAndGet()
                 releaseTunnelResources()
-                scheduleReconnect(reason, immediate = true)
+                // Startup may still be waiting for DNS/TCP on the worker.
+                // Its finally block cannot clear `starting` after invalidation.
+                // Queue the replacement after it unwinds, otherwise the zero-
+                // delay scheduler observes `starting=true` and drops the retry.
+                worker.execute {
+                    if (replacement == sessionGeneration.get() && wantsConnection() && !stopping) {
+                        starting = false
+                        scheduleReconnect(reason, immediate = true)
+                    }
+                }
             }
         }, 20, TimeUnit.SECONDS)
     }
@@ -740,7 +806,7 @@ class OpenFluxVpnService : VpnService() {
         .setStyle(NotificationCompat.BigTextStyle().bigText(text))
         .setOngoing(true)
         .setPriority(NotificationCompat.PRIORITY_DEFAULT)
-        .setOnlyAlertOnce(true)
+          .setOnlyAlertOnce(true)
         .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Отключить",
             PendingIntent.getService(this, 921, Intent(this, OpenFluxVpnService::class.java).setAction(STOP), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE))
         .build()

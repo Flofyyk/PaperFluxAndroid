@@ -1,0 +1,265 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:where(.pf-dark, .pf-dark *));
+
+/* ---------------------------------------------------------------- */
+/* PaperFlux design tokens — Material 3 inspired, custom palette     */
+/* ---------------------------------------------------------------- */
+:root {
+  --pf-inset-top: env(safe-area-inset-top, 0px);
+  --pf-inset-right: env(safe-area-inset-right, 0px);
+  --pf-inset-bottom: env(safe-area-inset-bottom, 0px);
+  --pf-inset-left: env(safe-area-inset-left, 0px);
+  --pf-bg: #eef0fb;
+
+  --surface: #fbf9ff;
+  --surface-dim: #e3e1eb;
+  --surface-container-low: #f5f3fb;
+  --surface-container: #efedf7;
+  --surface-container-high: #e9e6f3;
+  --surface-container-highest: #e2dfee;
+  --on-surface: #1b1b23;
+  --on-surface-variant: #47454f;
+  --outline: #79767f;
+  --outline-variant: #cac6d2;
+
+  --primary: #5b4fe8;
+  --primary-strong: #4a3fd6;
+  --on-primary: #ffffff;
+  --primary-container: #e4dfff;
+  --on-primary-container: #150863;
+
+  --secondary-container: #dfe1f9;
+  --on-secondary-container: #1b2260;
+
+  --success: #1b8a5a;
+  --on-success: #ffffff;
+  --success-container: #d3f5e2;
+  --on-success-container: #04321c;
+
+  --warning: #9a6300;
+  --on-warning: #ffffff;
+  --warning-container: #ffe4b8;
+  --on-warning-container: #2e1a00;
+
+  --error: #d5253f;
+  --on-error: #ffffff;
+  --error-container: #ffdad8;
+  --on-error-container: #410004;
+
+  --shadow-color: 240 40% 30%;
+}
+
+.pf-dark {
+  --pf-bg: #08070d;
+
+  --surface: #131219;
+  --surface-dim: #0d0c12;
+  --surface-container-low: #17161e;
+  --surface-container: #1c1a24;
+  --surface-container-high: #26232e;
+  --surface-container-highest: #312e3a;
+  --on-surface: #e7e2ec;
+  --on-surface-variant: #cac6d2;
+  --outline: #948f9a;
+  --outline-variant: #48454e;
+
+  --primary: #c3b8ff;
+  --primary-strong: #d9d0ff;
+  --on-primary: #2a1a86;
+  --primary-container: #423593;
+  --on-primary-container: #e6dfff;
+
+  --secondary-container: #333866;
+  --on-secondary-container: #dfe1ff;
+
+  --success: #7fdda6;
+  --on-success: #023821;
+  --success-container: #0b5734;
+  --on-success-container: #b3f2cb;
+
+  --warning: #ffb95c;
+  --on-warning: #472a00;
+  --warning-container: #6b4400;
+  --on-warning-container: #ffddad;
+
+  --error: #ffb3ae;
+  --on-error: #690007;
+  --error-container: #93000f;
+  --on-error-container: #ffdad8;
+}
+
+@theme inline {
+  --font-sans: system-ui, -apple-system, "Roboto", "Noto Sans", sans-serif;
+  --font-mono: ui-monospace, "Roboto Mono", "Noto Sans Mono", monospace;
+
+  --color-app-bg: var(--pf-bg);
+
+  --color-surface: var(--surface);
+  --color-surface-dim: var(--surface-dim);
+  --color-surface-container-low: var(--surface-container-low);
+  --color-surface-container: var(--surface-container);
+  --color-surface-container-high: var(--surface-container-high);
+  --color-surface-container-highest: var(--surface-container-highest);
+  --color-on-surface: var(--on-surface);
+  --color-on-surface-variant: var(--on-surface-variant);
+  --color-outline: var(--outline);
+  --color-outline-variant: var(--outline-variant);
+
+  --color-primary: var(--primary);
+  --color-primary-strong: var(--primary-strong);
+  --color-on-primary: var(--on-primary);
+  --color-primary-container: var(--primary-container);
+  --color-on-primary-container: var(--on-primary-container);
+
+  --color-secondary-container: var(--secondary-container);
+  --color-on-secondary-container: var(--on-secondary-container);
+
+  --color-success: var(--success);
+  --color-on-success: var(--on-success);
+  --color-success-container: var(--success-container);
+  --color-on-success-container: var(--on-success-container);
+
+  --color-warning: var(--warning);
+  --color-on-warning: var(--on-warning);
+  --color-warning-container: var(--warning-container);
+  --color-on-warning-container: var(--on-warning-container);
+
+  --color-error: var(--error);
+  --color-on-error: var(--on-error);
+  --color-error-container: var(--error-container);
+  --color-on-error-container: var(--on-error-container);
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+.pf-app-shell {
+  box-sizing: border-box;
+  min-height: 100dvh;
+  padding: var(--pf-inset-top) var(--pf-inset-right) var(--pf-inset-bottom) var(--pf-inset-left);
+}
+
+.pf-app-frame {
+  height: calc(100dvh - var(--pf-inset-top) - var(--pf-inset-bottom));
+  min-height: 0;
+}
+
+@media (min-width: 720px) {
+  .pf-app-frame {
+    max-width: 980px;
+    margin: 0 auto;
+    border-inline: 1px solid color-mix(in srgb, var(--outline-variant) 45%, transparent);
+  }
+}
+
+@media (max-width: 360px), (max-height: 620px) {
+  .pf-app-frame .px-5 { padding-inline: 1rem; }
+  .pf-app-frame .h-48 { height: 10rem; }
+  .pf-app-frame .w-48 { width: 10rem; }
+  .pf-app-frame .h-40 { height: 8rem; }
+  .pf-app-frame .w-40 { width: 8rem; }
+}
+
+body {
+  font-family: var(--font-sans);
+  -webkit-tap-highlight-color: transparent;
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--outline-variant) transparent;
+}
+*::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+*::-webkit-scrollbar-thumb {
+  background: var(--outline-variant);
+  border-radius: 999px;
+}
+
+@keyframes pf-pulse-ring {
+  0% {
+    transform: scale(0.86);
+    opacity: 0.55;
+  }
+  70% {
+    transform: scale(1.35);
+    opacity: 0;
+  }
+  100% {
+    transform: scale(1.35);
+    opacity: 0;
+  }
+}
+.pf-pulse::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 9999px;
+  background: currentColor;
+  opacity: 0.35;
+  animation: pf-pulse-ring 2.2s cubic-bezier(0.4, 0, 0.3, 1) infinite;
+}
+
+@keyframes pf-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.pf-spin {
+  animation: pf-spin 1.1s linear infinite;
+}
+
+@keyframes pf-fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.pf-fade-up {
+  animation: pf-fade-up 0.35s ease both;
+}
+
+/* Chromium WebView skips style, layout and paint for journal rows that are
+   outside the viewport. Long diagnostic sessions stay smooth without losing
+   any entries from the UI or the exported log. */
+.pf-log-row {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 104px;
+}
+
+@keyframes pf-icon-swap {
+  from { opacity: 0; transform: scale(0.82); }
+  to { opacity: 1; transform: scale(1); }
+}
+.pf-icon-swap { animation: pf-icon-swap 0.22s ease-out both; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+@keyframes pf-blink {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+.pf-blink {
+  animation: pf-blink 1.4s ease-in-out infinite;
+}
