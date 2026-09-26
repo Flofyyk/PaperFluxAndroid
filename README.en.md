@@ -16,7 +16,7 @@
 
 PaperFlux Android is a VPN client that connects to a PaperFlux server through Yandex Docs. It includes connection profiles, per-app exclusions, traffic statistics and an event journal.
 
-To connect, scan a QR code with the built-in camera scanner, import a configuration from the clipboard or a file, or enter the parameters manually. The profile supplies the server and document URL.
+To connect, scan a QR code with the built-in camera scanner, import a configuration from the clipboard or a file, or enter a name, server IP/domain and profile password. Manual setup retrieves the remaining settings from the server. Any PaperFlux server owner can enable the optional [profile discovery service](https://github.com/Flofyyk/PaperFlux/blob/main/docs/PROFILES.md); without it, import a complete configuration. The profile password is an access key, not the VPS SSH/root password.
 
 ## Interface
 
@@ -32,6 +32,7 @@ To connect, scan a QR code with the built-in camera scanner, import a configurat
 
 - Android VPN service with session traffic counters and a persistent event journal.
 - Profiles with selection, editing and deletion; QR, clipboard and file import or manual entry.
+- Profile sharing with a locally generated QR code, link copying and the Android share sheet for links or QR images. Shared configurations contain the access key: send them only to trusted recipients.
 - An in-app QR scanner with a flashlight. Decoding is local, without Google Lens or Google Play Services; images are neither stored nor uploaded.
 - Per-app exclusions: selected applications bypass the VPN. Reconnect after changing the list.
 - Yandex Docs transport with authenticated tunnel readiness checks and reconnection handling.
@@ -50,7 +51,7 @@ Choose **universal** if unsure about your device architecture. Architecture-spec
 
 ## Transports and recovery
 
-Android 0.4.14 requires PaperFlux Server 0.5.6 with `--session`; update both sides. Session uses batched/zstd and is not interchangeable with the legacy PFS2 protocol.
+Android 0.4.15 is compatible with PaperFlux Server 0.5.6–0.5.7 using `--session`. Session uses batched/zstd and is not interchangeable with the legacy PFS2 protocol. Enable the profile discovery service for address-and-key setup; complete configuration import does not require it.
 
 The interface lists Yandex once, alongside Cups.online and Mail.ru Docs. Imported profiles retain their underlying Yandex protocol type. Volga profiles still require a separate empty document because that transport modifies document content.
 

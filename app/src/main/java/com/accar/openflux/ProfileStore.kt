@@ -31,7 +31,15 @@ class ProfileStore(private val context: Context) {
         require(bytes.size >= 28) { "Хранилище профилей повреждено" }
         val cipher = Cipher.getInstance("AES/GCM/NoPadding")
         cipher.init(Cipher.DECRYPT_MODE, key(), GCMParameterSpec(128, bytes.copyOfRange(0, 12)))
-        return JSONObject(String(cipher.doFinal(bytes, 12, bytes.size - 12), Charsets.UTF_8))
+        val data = JSONObject(String(cipher.doFinal(bytes, 12, bytes.size - 12), Charsets.UTF_8))
+        val rows = data.getJSONArray("profiles")
+        val oldActive = data.optString("activeId")
+        for (i in 0 until rows.length()) {
+            val row = rows.getJSONObject(i)
+            row.put("key", profileKey(row))
+            if (row.getString("id") == oldActive) data.put("activeId", row.getString("key"))
+        }
+        return data
     }
     private fun write(data: JSONObject) {
         val cipher = Cipher.getInstance("AES/GCM/NoPadding")
@@ -43,8 +51,14 @@ class ProfileStore(private val context: Context) {
     fun active(): JSONObject? {
         val data = read()
         val rows = data.getJSONArray("profiles")
-        for (i in 0 until rows.length()) if (rows.getJSONObject(i).getString("id") == data.optString("activeId")) return rows.getJSONObject(i)
+        for (i in 0 until rows.length()) if (rows.getJSONObject(i).getString("key") == data.optString("activeId")) return rows.getJSONObject(i)
         return null
+    }
+    fun find(id: String): JSONObject {
+        val rows = read().getJSONArray("profiles")
+        val values = (0 until rows.length()).map { rows.getJSONObject(it) }
+        return values.firstOrNull { it.getString("key") == id }
+            ?: values.filter { it.getString("id") == id }.singleOrNull() ?: error("Профиль не найден")
     }
     private fun documents(profile: JSONObject): JSONArray {
         val source = profile.optJSONArray("documentUrls")
@@ -61,8 +75,10 @@ class ProfileStore(private val context: Context) {
         value.put("documentUrls", docs)
         value.put("documentUrl", (0 until docs.length()).joinToString(",") { docs.getString(it) })
         value.put("transport", value.optString("transport", "yandex").ifBlank { "yandex" })
+        value.put("key", profileKey(value))
         return value
     }
+    private fun profileKey(profile: JSONObject) = profile.optString("server").trim().lowercase(java.util.Locale.ROOT) + "|" + profile.getString("id")
     fun migrate() {
         if (file.baseFile.exists()) return
         val prefs = context.getSharedPreferences(OpenFluxVpnService.PREFS, Context.MODE_PRIVATE)
@@ -78,36 +94,36 @@ class ProfileStore(private val context: Context) {
     fun publicState(): String {
         val data = read()
         val rows = data.getJSONArray("profiles")
-        for (i in 0 until rows.length()) { rows.getJSONObject(i).remove("token") }
+        for (i in 0 until rows.length()) {
+            rows.getJSONObject(i).apply { remove("token"); put("profileId", getString("id")); put("id", getString("key")) }
+        }
         return data.toString()
     }
-    fun save(profile: JSONObject) {
+    fun save(profile: JSONObject, replacing: String? = null) = synchronized(storeLock) {
         val canonical = canonical(profile)
         val data = read()
         val rows = data.getJSONArray("profiles")
         val next = JSONArray()
-        for (i in 0 until rows.length()) if (rows.getJSONObject(i).getString("id") != canonical.getString("id")) next.put(rows.getJSONObject(i))
+        for (i in 0 until rows.length()) if (rows.getJSONObject(i).getString("key") != canonical.getString("key") && rows.getJSONObject(i).getString("key") != replacing) next.put(rows.getJSONObject(i))
         next.put(canonical)
-        data.put("profiles", next).put("activeId", canonical.getString("id"))
+        data.put("profiles", next).put("activeId", canonical.getString("key"))
         write(data)
         mirror(canonical)
     }
-    fun select(id: String) {
+    fun select(id: String) = synchronized(storeLock) {
         val data = read()
-        val rows = data.getJSONArray("profiles")
-        val profile = (0 until rows.length()).map { rows.getJSONObject(it) }.firstOrNull { it.getString("id") == id }
-            ?: error("Профиль не найден")
-        write(data.put("activeId", id))
+        val profile = find(id)
+        write(data.put("activeId", profile.getString("key")))
         mirror(profile)
     }
-    fun update(id: String, name: String, server: String, documentUrl: String, clientIp: String, provider: String, replacementToken: String?) {
+    fun update(id: String, name: String, server: String, documentUrl: String, clientIp: String, provider: String, replacementToken: String?) = synchronized(storeLock) {
         val data = read()
         val rows = data.getJSONArray("profiles")
         val next = JSONArray()
         var updated: JSONObject? = null
         for (i in 0 until rows.length()) {
             val current = rows.getJSONObject(i)
-            if (current.getString("id") != id) {
+            if (current.getString("key") != id) {
                 next.put(current)
                 continue
             }
@@ -121,16 +137,18 @@ class ProfileStore(private val context: Context) {
         }
         require(updated != null) { "Профиль не найден" }
         data.put("profiles", next)
+        val wasActive = data.optString("activeId") == id
+        if (wasActive) data.put("activeId", updated!!.getString("key"))
         write(data)
-        if (data.optString("activeId") == id) mirror(updated)
+        if (wasActive) mirror(updated)
     }
-    fun delete(id: String) {
+    fun delete(id: String) = synchronized(storeLock) {
         val data = read()
         val rows = data.getJSONArray("profiles")
         val next = JSONArray()
-        for (i in 0 until rows.length()) if (rows.getJSONObject(i).getString("id") != id) next.put(rows.getJSONObject(i))
+        for (i in 0 until rows.length()) if (rows.getJSONObject(i).getString("key") != id) next.put(rows.getJSONObject(i))
         data.put("profiles", next)
-        if (data.optString("activeId") == id) data.put("activeId", if (next.length() > 0) next.getJSONObject(0).getString("id") else "")
+        if (data.optString("activeId") == id) data.put("activeId", if (next.length() > 0) next.getJSONObject(0).getString("key") else "")
         write(data)
         mirror(active())
     }
@@ -144,4 +162,5 @@ class ProfileStore(private val context: Context) {
             .putString("server_ip", profile?.optString("server").orEmpty())
             .remove("profile_token").commit()) { "Не удалось сохранить выбор профиля" }
     }
+    companion object { private val storeLock = Any() }
 }

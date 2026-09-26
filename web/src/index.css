@@ -148,6 +148,29 @@ body,
   min-height: 0;
 }
 
+.pf-profile-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: calc(var(--pf-inset-top) + 12px) calc(var(--pf-inset-right) + 12px) calc(var(--pf-inset-bottom) + 12px) calc(var(--pf-inset-left) + 12px);
+  background: #000a;
+}
+.pf-profile-dialog {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  width: 100%;
+  max-width: 460px;
+  max-height: calc(100dvh - var(--pf-inset-top) - var(--pf-inset-bottom) - 24px);
+  overflow: hidden;
+  border-radius: 28px;
+  background: var(--surface-container-low);
+  border: 1px solid var(--outline-variant);
+}
+
 @media (min-width: 720px) {
   .pf-app-frame {
     max-width: 980px;

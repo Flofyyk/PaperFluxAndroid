@@ -51,6 +51,8 @@ import java.io.ByteArrayOutputStream
 import java.security.SecureRandom
 
 class MainActivity : AppCompatActivity() {
+    @Volatile private var profileLoader: ProfileBootstrapClient? = null
+    private val profileRequestGeneration = java.util.concurrent.atomic.AtomicLong()
     private var designWeb: WebView? = null
     @Volatile private var installedAppsCache: String? = null
     private data class StageWidget(
@@ -105,8 +107,17 @@ class MainActivity : AppCompatActivity() {
             "Импорт отменён"
         } else {
             runCatching {
-                val bytes = contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: error("Не удалось прочитать файл")
-                require(bytes.size <= 64 * 1024) { "Файл конфига слишком большой" }
+                val bytes = contentResolver.openInputStream(uri)?.use { input ->
+                    val output = ByteArrayOutputStream()
+                    val chunk = ByteArray(4096)
+                    while (true) {
+                        val count = input.read(chunk)
+                        if (count < 0) break
+                        require(output.size() + count <= 64 * 1024) { "Файл конфига слишком большой" }
+                        output.write(chunk, 0, count)
+                    }
+                    output.toByteArray()
+                } ?: error("Не удалось прочитать файл")
                 importProfileConfig(String(bytes, Charsets.UTF_8))
             }.getOrElse { "Ошибка импорта: ${it.message ?: "неверный файл"}" }
         }
@@ -138,6 +149,44 @@ class MainActivity : AppCompatActivity() {
         sendWebState(snapshot.optString("state"), snapshot.optString("detail"), duration = snapshot.optLong("durationSec", -1L), rx = snapshot.optLong("rxBytes", -1L), tx = snapshot.optLong("txBytes", -1L), ping = snapshot.optLong("ping", -1L))
     }
     override fun onStop() { runCatching { unregisterReceiver(stateReceiver) }; super.onStop() }
+    override fun onDestroy() {
+        cancelProfileRequest()
+        designWeb?.removeJavascriptInterface("PaperFluxNative")
+        designWeb?.destroy()
+        designWeb = null
+        super.onDestroy()
+    }
+    private fun cancelProfileRequest() { profileRequestGeneration.incrementAndGet(); profileLoader?.cancel(); profileLoader = null }
+    private fun fetchManualProfile(value: org.json.JSONObject) {
+        requireProfilesIdle()
+        cancelProfileRequest()
+        val generation = profileRequestGeneration.get()
+        val loader = ProfileBootstrapClient().also { profileLoader = it }
+        val server = value.optString("server").trim()
+        val secret = value.optString("token").trim()
+        val name = value.optString("name").trim()
+        val requestId = value.optString("requestId")
+        val replacing = value.optString("id").takeIf { !value.optBoolean("isNew") && it.isNotBlank() }
+        Thread {
+            val result = runCatching { loader.fetch(server, secret, name) }
+            runOnUiThread {
+                if (generation != profileRequestGeneration.get() || isFinishing || isDestroyed) return@runOnUiThread
+                val message = result.fold(onSuccess = { profile -> runCatching {
+                    requireProfilesIdle(); ProfileStore(this).save(profile, replacing); "Профиль добавлен и выбран"
+                }.getOrElse { it.message ?: "Не удалось сохранить профиль" } }, onFailure = { error ->
+                    when (error) {
+                        is java.net.SocketTimeoutException, is java.net.ConnectException, is java.net.UnknownHostException -> "Не удалось получить профиль. Проверьте адрес и наличие сервиса профилей на сервере; также можно импортировать QR или конфиг"
+                        is javax.crypto.AEADBadTagException -> "Сервер не прошёл защищённую проверку"
+                        is IllegalStateException, is IllegalArgumentException -> error.message ?: "Неверные параметры профиля"
+                        else -> "Не удалось получить профиль с сервера"
+                    }
+                })
+                profileLoader = null
+                val payload = org.json.JSONObject().put("requestId", requestId).put("message", message).put("ok", message.startsWith("Профиль добавлен"))
+                designWeb?.evaluateJavascript("window.__paperFluxOnManualProfile&&window.__paperFluxOnManualProfile(${org.json.JSONObject.quote(payload.toString())})", null)
+            }
+        }.start()
+    }
 
     private fun buildWebUi() {
         val web = WebView(this).apply {
@@ -183,7 +232,11 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun applyWebInsets(web: WebView, insets: WindowInsetsCompat) {
-        val safe = insets.getInsets(WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout() or WindowInsetsCompat.Type.ime())
+        val safe = insets.getInsets(WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout())
+        val keyboard = insets.getInsets(WindowInsetsCompat.Type.ime())
+        val windowHeight = if (Build.VERSION.SDK_INT >= 30) windowManager.currentWindowMetrics.bounds.height() else resources.displayMetrics.heightPixels
+        val resizedSpace = (windowHeight - web.height).coerceAtLeast(0)
+        val bottom = maxOf(safe.bottom, (keyboard.bottom - resizedSpace).coerceAtLeast(0))
         // WebView CSS pixels are density-independent while WindowInsets are
         // physical pixels. Passing the raw number made a 3x status inset on
         // high-density devices and pushed the whole header far down.
@@ -194,7 +247,7 @@ class MainActivity : AppCompatActivity() {
                 "(function(root){if(!root)return;" +
                     "root.style.setProperty('--pf-inset-top','${cssPx(safe.top)}px');" +
                     "root.style.setProperty('--pf-inset-right','${cssPx(safe.right)}px');" +
-                    "root.style.setProperty('--pf-inset-bottom','${cssPx(safe.bottom)}px');" +
+                    "root.style.setProperty('--pf-inset-bottom','${cssPx(bottom)}px');" +
                     "root.style.setProperty('--pf-inset-left','${cssPx(safe.left)}px');" +
                     "})(document.documentElement);", null)
         }
@@ -218,79 +271,19 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun profileFromConfig(rawValue: String): org.json.JSONObject {
-        val raw = rawValue.trim()
-        val uriStart = raw.indexOf("paperflux://config?")
-        val source = if (uriStart >= 0) {
-            val uri = android.net.Uri.parse(raw.substring(uriStart).lineSequence().first().trim())
-            check(uri.scheme == "paperflux" && uri.host == "config") { "Нужна ссылка paperflux://config" }
-            org.json.JSONObject()
-                .put("id", uri.getQueryParameter("id"))
-                .put("token", uri.getQueryParameter("token"))
-                .put("clientIp", uri.getQueryParameter("ip"))
-                .put("documentUrl", uri.getQueryParameter("doc"))
-                .put("transport", uri.getQueryParameter("transport") ?: "yandex")
-                .put("server", uri.getQueryParameter("server"))
-                .put("name", uri.getQueryParameter("name") ?: "PaperFlux")
-        } else {
-            org.json.JSONObject(raw)
-        }
-        val id = source.optString("id").trim()
-        val token = source.optString("token").trim()
-        val documents = source.optJSONArray("documentUrls")?.let { values ->
-            (0 until values.length()).map { values.optString(it).trim() }.filter { it.isNotEmpty() }
-        } ?: splitDocumentUrls(source.optString("documentUrl", source.optString("doc")))
-        val document = documents.joinToString(",")
-        val clientIp = source.optString("clientIp", source.optString("ip")).trim()
-        val server = source.optString("server").trim()
-        val name = source.optString("name", "PaperFlux").trim().ifBlank { "PaperFlux" }
-        val provider = source.optString("transport", "yandex").ifBlank { "yandex" }
-        check(id.matches(Regex("[1-9][0-9]*"))) { "В конфиге нет ID профиля" }
-        check(token.length >= 32) { "Нужен токен доступа не короче 32 символов" }
-        check(validResource(provider, documents)) { "Проверьте ссылку или комнаты выбранного транспорта" }
-        check(server.isNotBlank()) { "В конфиге нет адреса сервера" }
-        check(clientIp.matches(Regex("10\\.10\\.10\\.(?:[1-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-4])"))) { "Некорректный виртуальный IP" }
-        return org.json.JSONObject().put("id", id).put("token", token).put("clientIp", clientIp)
-            .put("documentUrl", document).put("documentUrls", org.json.JSONArray(documents)).put("server", server).put("name", name).put("transport", provider)
-    }
+    private fun profileFromConfig(rawValue: String) = ProfileConfig.parse(rawValue)
 
     private fun importProfileConfig(value: String): String = try {
         requireProfilesIdle()
-        val profile = profileFromConfig(value)
-        ProfileStore(this).save(profile)
+        ProfileStore(this).save(profileFromConfig(value))
         "Профиль добавлен и выбран"
     } catch (e: Exception) {
         "Ошибка импорта: ${e.message ?: "неверный формат"}"
     }
 
-    /** Manual input often arrives as two lines or is copied with semicolons. */
-    private fun splitDocumentUrls(value: String): List<String> =
-        value.split(Regex("[;,\\n\\r]+")).map { it.trim() }.filter { it.isNotEmpty() }.distinct()
-
-    private fun validDocumentUrls(documents: List<String>): Boolean =
-        documents.isNotEmpty() && documents.size <= 2 && documents.all { url ->
-            runCatching {
-                val uri = android.net.Uri.parse(url)
-                uri.scheme == "https" && uri.host == "disk.yandex.ru" && uri.userInfo == null && uri.port == -1 && !uri.path.isNullOrBlank()
-            }.getOrDefault(false)
-        }
-
-    private fun validResource(provider: String, resources: List<String>): Boolean = when (provider) {
-        "yandex" -> validDocumentUrls(resources)
-        "vyandex" -> resources.size == 1 && validDocumentUrls(resources)
-        "mailru" -> resources.size == 1 && runCatching {
-            val uri = android.net.Uri.parse(resources[0])
-            uri.scheme == "https" && uri.host == "cloud.mail.ru" && uri.path?.startsWith("/public/") == true
-        }.getOrDefault(false)
-        "cupsonline" -> resources.size == 1 && runCatching {
-            val bytes = Base64.decode(resources[0], Base64.URL_SAFE or Base64.NO_PADDING or Base64.NO_WRAP)
-            val rooms = org.json.JSONArray(String(bytes, Charsets.UTF_8))
-            rooms.length() in 1..8 && (0 until rooms.length()).all {
-                rooms.getString(it).matches(Regex("[0-9a-fA-F-]{36}"))
-            }
-        }.getOrDefault(false)
-        else -> false
-    }
+    private fun splitDocumentUrls(value: String) = ProfileConfig.documents(value)
+    private fun validDocumentUrls(documents: List<String>) = ProfileConfig.validDocuments(documents)
+    private fun validResource(provider: String, resources: List<String>) = ProfileConfig.validResource(provider, resources)
 
     private inner class PaperFluxBridge {
         private fun requireIdle() = requireProfilesIdle()
@@ -338,36 +331,29 @@ class MainActivity : AppCompatActivity() {
         @JavascriptInterface fun scanQr() = runOnUiThread {
             qrScanner.launch(Intent(this@MainActivity, QrScanActivity::class.java))
         }
+        @JavascriptInterface fun cancelManualProfile() { cancelProfileRequest() }
+        @JavascriptInterface fun shareProfile(id: String) = runOnUiThread {
+            startActivity(Intent(this@MainActivity, ProfileShareActivity::class.java).putExtra("profile-key", id))
+        }
         @JavascriptInterface fun pickConfigFile() = runOnUiThread {
             profileFilePicker.launch(arrayOf("text/plain", "application/json", "application/octet-stream"))
         }
         @JavascriptInterface fun updateProfile(raw: String): String = try {
             requireIdle()
             val value = org.json.JSONObject(raw)
-            val id = value.optString("id").trim()
+            val id = value.optString("id")
             val name = value.optString("name").trim().ifBlank { "PaperFlux" }
-            val document = value.optString("documentUrl").trim()
-            val clientIp = value.optString("clientIp").trim()
             val server = value.optString("server").trim()
-            val token = value.optString("token").trim()
-            val provider = value.optString("transport", "yandex").ifBlank { "yandex" }
-            check(id.matches(Regex("[1-9][0-9]*"))) { "Укажите ID профиля" }
-            val documents = splitDocumentUrls(document)
-            check(validResource(provider, documents)) { "Проверьте ссылку или комнаты выбранного транспорта" }
-            check(clientIp.matches(Regex("10\\.10\\.10\\.(?:[1-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-4])"))) { "Укажите виртуальный IP" }
+            val password = value.optString("token").trim()
             val store = ProfileStore(this@MainActivity)
-            val state = org.json.JSONObject(store.publicState())
-            val exists = (0 until state.getJSONArray("profiles").length()).any { state.getJSONArray("profiles").getJSONObject(it).optString("id") == id }
-            if (exists) {
-                store.update(id, name, server, documents.joinToString(","), clientIp, provider, token.ifBlank { null })
-                "Профиль сохранён"
+            val current = if (!value.optBoolean("isNew")) store.find(id) else null
+            if (current == null || password.isNotBlank() || server != current.optString("server")) {
+                check(password.isNotBlank()) { "Для загрузки профиля укажите пароль с сервера" }
+                fetchManualProfile(value)
+                "Загружаем профиль с сервера…"
             } else {
-                check(server.isNotBlank()) { "Укажите адрес сервера профиля" }
-                check(token.length >= 32) { "Для нового профиля нужен ключ доступа" }
-                store.save(org.json.JSONObject().put("id", id).put("name", name).put("server", server)
-                    .put("documentUrl", documents.joinToString(",")).put("documentUrls", org.json.JSONArray(documents))
-                    .put("clientIp", clientIp).put("token", token).put("transport", provider))
-                "Профиль создан и выбран"
+                store.update(id, name, server, current.getString("documentUrl"), current.getString("clientIp"), current.getString("transport"), null)
+                "Профиль сохранён"
             }
         } catch (e: Exception) { "Ошибка профиля: ${e.message ?: "проверьте поля"}" }
         @JavascriptInterface fun getState(): String = TunnelSnapshot.read(this@MainActivity).toString()

@@ -15,6 +15,10 @@
     <application android:allowBackup="false" android:usesCleartextTraffic="true" android:extractNativeLibs="true" android:theme="@style/AppTheme" android:label="PaperFlux" android:icon="@drawable/ic_paperflux_mark" android:roundIcon="@drawable/ic_paperflux_mark">
         <activity android:name=".YandexAuthActivity" android:exported="false" android:process=":auth" />
         <activity android:name=".QrScanActivity" android:exported="false" />
+        <activity android:name=".ProfileShareActivity" android:exported="false" />
+        <provider android:name="androidx.core.content.FileProvider" android:authorities="${applicationId}.profile-files" android:exported="false" android:grantUriPermissions="true">
+            <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/profile_file_paths" />
+        </provider>
         <activity android:name=".MainActivity" android:exported="true">
             <intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter>
         </activity>

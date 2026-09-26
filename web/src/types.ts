@@ -1,6 +1,6 @@
 export type TabId = "home" | "profiles" | "logs" | "settings";
 
-export interface PaperFluxProfile { id: string; name: string; server: string; documentUrl: string; clientIp?: string; transport?: "yandex" | "vyandex" | "cupsonline" | "mailru"; }
+export interface PaperFluxProfile { id: string; profileId?: string; name: string; server: string; documentUrl: string; clientIp?: string; transport?: "yandex" | "vyandex" | "cupsonline" | "mailru"; }
 
 export type ConnectionStatus =
   | "idle"
