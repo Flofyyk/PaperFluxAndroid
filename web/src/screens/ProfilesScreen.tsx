@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Check, ClipboardPlus, Eye, EyeOff, FileKey, LoaderCircle, Pencil, Plus, ScanQrCode, Share2, ShieldCheck, Trash2, Upload, X } from "lucide-react";
+import { Activity, ChevronDown, ClipboardPlus, Eye, EyeOff, FileKey, Globe2, LoaderCircle, Pencil, Plus, ScanQrCode, Share2, ShieldCheck, Trash2, Upload, X } from "lucide-react";
 import type { PaperFluxProfile } from "../types";
 import { ScreenHeader } from "../components/ui/ScreenHeader";
 import { useToast } from "../hooks/useToast";
@@ -7,9 +7,11 @@ import { useToast } from "../hooks/useToast";
 type Draft = { id: string; name: string; server: string; originalServer: string; token: string; isNew: boolean };
 const native = () => (window as Window & { PaperFluxNative?: { shareProfile?: (id: string) => void; cancelManualProfile?: () => void } }).PaperFluxNative;
 const providerName = (provider?: string) => provider === "mailru" ? "Mail.ru" : provider === "cupsonline" ? "Cups.online" : "Яндекс";
+type Inspection = { id: string; address?: string; countryCode?: string; latencyMs?: number; error?: string; checking?: boolean; pinged?: boolean };
+const flagFor = (code?: string) => code && /^[A-Z]{2}$/.test(code) ? String.fromCodePoint(...[...code].map(c => c.charCodeAt(0) + 127397)) : null;
 
-export function ProfilesScreen({ profiles, activeId, onClipboard, onPickFile, onQr, onSave, onSelect, onDelete, onRefresh }: {
-  profiles: PaperFluxProfile[]; activeId: string; onClipboard: () => string; onPickFile: () => void; onQr: () => void; onSave: (raw: string) => string;
+export function ProfilesScreen({ profiles, activeId, inspections, onInspect, onClipboard, onPickFile, onQr, onSave, onSelect, onDelete, onRefresh }: {
+  profiles: PaperFluxProfile[]; activeId: string; inspections: Record<string, Inspection>; onInspect: (id: string, force?: boolean) => void; onClipboard: () => string; onPickFile: () => void; onQr: () => void; onSave: (raw: string) => string;
   onSelect: (id: string) => string; onDelete: (id: string) => string; onRefresh: () => void;
 }) {
   const { show } = useToast();
@@ -17,7 +19,15 @@ export function ProfilesScreen({ profiles, activeId, onClipboard, onPickFile, on
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<PaperFluxProfile | null>(null);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
   const request = useRef<string | null>(null);
+  useEffect(() => {
+    const observer = new IntersectionObserver(entries => {
+      entries.forEach(entry => { if (entry.isIntersecting) onInspect((entry.target as HTMLElement).dataset.profileId || ""); });
+    }, { rootMargin: "120px" });
+    document.querySelectorAll("[data-profile-id]").forEach(card => observer.observe(card));
+    return () => observer.disconnect();
+  }, [profiles, onInspect]);
   useEffect(() => {
     const win = window as Window & { __paperFluxOnProfileFile?: (result: string) => void; __paperFluxOnManualProfile?: (raw: string) => void };
     win.__paperFluxOnProfileFile = result => { show(result); if (result.startsWith("Профиль добавлен")) onRefresh(); };
@@ -60,17 +70,23 @@ export function ProfilesScreen({ profiles, activeId, onClipboard, onPickFile, on
       </div>
       <div className="flex flex-col gap-3">
         {profiles.length === 0 && <div className="rounded-[28px] border border-dashed border-outline-variant p-8 text-center"><FileKey className="mx-auto mb-4 h-10 w-10 text-primary" /><p className="font-semibold text-on-surface">Добавьте первое подключение</p><p className="mt-2 text-[13px] leading-5 text-on-surface-variant">Отсканируйте QR-код или введите адрес сервера и пароль профиля.</p></div>}
-        {profiles.map(p => <div key={p.id} className={"rounded-[28px] border-2 p-3 " + (p.id === activeId ? "border-primary bg-primary/5" : "border-outline-variant/35 bg-surface-container")}>
-          <button onClick={() => show(onSelect(p.id))} className="flex w-full min-w-0 items-center gap-3 px-1 py-1 text-left">
-            <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-primary-container text-on-primary-container"><ShieldCheck className="h-6 w-6" /></span>
-            <span className="min-w-0 flex-1"><span className="block break-words text-[17px] font-bold leading-6 text-on-surface">{p.name}</span><span className="mt-0.5 block truncate text-[12px] text-on-surface-variant">{p.server} · {providerName(p.transport)}</span></span>
-            {p.id === activeId && <Check aria-label="Выбран" className="h-5 w-5 shrink-0 text-primary" />}
-          </button>
-          <div className="mt-3 flex flex-wrap items-center justify-end gap-1 border-t border-outline-variant/25 pt-2">
-            <CardAction icon={Share2} label="Поделиться" onClick={() => native()?.shareProfile ? native()!.shareProfile!(p.id) : show("Обмен конфигурацией доступен в приложении")} />
-            <CardAction icon={Pencil} label="Изменить" onClick={() => edit(p)} />
-            <button aria-label={"Удалить " + p.name} onClick={() => setDeleting(p)} className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-on-surface-variant active:bg-error/15"><Trash2 className="h-4 w-4" /></button>
+        {profiles.map(p => <div key={p.id} data-profile-id={p.id} className={"overflow-hidden rounded-[24px] border bg-surface-container " + (p.id === activeId ? "border-primary/70" : "border-outline-variant/35")}>
+          <div className="flex min-w-0 items-center px-3 pb-3 pt-3">
+            <button onClick={() => { if (p.id !== activeId) show(onSelect(p.id)); }} className="flex min-h-14 min-w-0 flex-1 items-center gap-3 rounded-xl px-1 text-left active:bg-primary/10" aria-label={p.id === activeId ? `${p.name}, выбран` : `Выбрать профиль ${p.name}`}>
+              <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-surface-container-high text-[23px] text-on-surface-variant">{flagFor(inspections[p.id]?.countryCode) || <Globe2 className="h-6 w-6" />}</span>
+              <span className="min-w-0 flex-1"><span className="flex flex-wrap items-center gap-2"><span className="break-words text-[16px] font-bold leading-5 text-on-surface">{p.name}</span>{p.id === activeId && <span className="rounded-full bg-primary/15 px-2 py-0.5 text-[10px] font-bold text-primary">ВЫБРАН</span>}</span><span className="mt-1 block break-all text-[12px] text-on-surface-variant">{p.server}</span></span>
+            </button>
+            <button aria-label={expandedId === p.id ? `Свернуть ${p.name}` : `Развернуть ${p.name}`} aria-expanded={expandedId === p.id} onClick={() => setExpandedId(expandedId === p.id ? null : p.id)} className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl text-on-surface-variant active:bg-primary/15"><ChevronDown className={"h-5 w-5 transition-transform " + (expandedId === p.id ? "rotate-180" : "")} /></button>
           </div>
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 px-4 pb-3 text-[12px] text-on-surface-variant"><span className="inline-flex items-center gap-1.5"><ShieldCheck className="h-3.5 w-3.5" />{providerName(p.transport)}</span>{(p.serverCount ?? 1) > 1 && <span>{p.serverCount} сервера · авторезерв</span>}{inspections[p.id]?.countryCode && <span title="Примерная страна по публичному IP">{inspections[p.id].countryCode}</span>}</div>
+          {expandedId === p.id && <div className="border-t border-outline-variant/30 px-3 py-2">
+            <div className="grid grid-cols-4 gap-1">
+              <CardAction icon={Activity} label={inspections[p.id]?.checking ? "Пингуем" : inspections[p.id]?.latencyMs ? `${inspections[p.id].latencyMs} мс` : inspections[p.id]?.pinged && inspections[p.id]?.error ? "Нет ответа" : "Пинг"} onClick={() => onInspect(p.id, true)} />
+              <CardAction icon={Share2} label="Поделиться" onClick={() => native()?.shareProfile ? native()!.shareProfile!(p.id) : show("Обмен конфигурацией доступен в приложении")} />
+              <CardAction icon={Pencil} label="Изменить" onClick={() => edit(p)} />
+              <CardAction icon={Trash2} label="Удалить" onClick={() => setDeleting(p)} />
+            </div>
+          </div>}
         </div>)}
       </div>
     </div>
@@ -83,7 +99,7 @@ function ImportAction({ icon: Icon, label, onClick }: { icon: typeof Plus; label
   return <button onClick={onClick} className="flex min-h-16 flex-col items-center justify-center gap-2 rounded-2xl bg-surface-container px-1 py-3 text-[11.5px] font-semibold text-on-surface-variant"><Icon className="h-5 w-5 text-primary" />{label}</button>;
 }
 function CardAction({ icon: Icon, label, onClick }: { icon: typeof Plus; label: string; onClick: () => void }) {
-  return <button onClick={onClick} className="flex min-h-11 items-center justify-center gap-2 rounded-full px-3 text-[12px] font-semibold text-on-surface-variant active:bg-primary/15"><Icon className="h-4 w-4 shrink-0" />{label}</button>;
+  return <button aria-label={label} onClick={onClick} className="flex min-h-14 min-w-0 flex-col items-center justify-center gap-1 rounded-xl px-1 text-[11px] font-semibold text-on-surface-variant active:bg-primary/15"><Icon className="h-4 w-4 shrink-0" /><span className="max-w-full truncate">{label}</span></button>;
 }
 function Editor({ draft, busy, error, onChange, onClose, onSave }: { draft: Draft; busy: boolean; error: string | null; onChange: (draft: Draft) => void; onClose: () => void; onSave: () => void }) {
   const [visible, setVisible] = useState(false);

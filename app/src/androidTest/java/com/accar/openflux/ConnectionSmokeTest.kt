@@ -11,7 +11,9 @@ class ConnectionSmokeTest {
     @Test fun repeatedConnectionsReachReady() {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val profile = requireNotNull(ProfileStore(context).active()) { "Select a device profile first" }
-        repeat(3) {
+        val attempts = InstrumentationRegistry.getArguments().getString("paperflux.smokeAttempts")
+            ?.toIntOrNull()?.coerceIn(1, 3) ?: 3
+        repeat(attempts) {
             context.startService(Intent(context, OpenFluxVpnService::class.java).setAction(OpenFluxVpnService.STOP))
             Thread.sleep(1500)
             val start = Intent(context, OpenFluxVpnService::class.java).setAction(OpenFluxVpnService.START)
@@ -26,7 +28,11 @@ class ConnectionSmokeTest {
                 state = TunnelSnapshot.read(context).optString("state")
                 if (state == "CONNECTED" || state == "ERROR") break
             }
-            assertEquals("Connection attempt ${it + 1}", "CONNECTED", state)
+            if (state != "CONNECTED") {
+                val detail = TunnelSnapshot.read(context).optString("detail")
+                context.startService(Intent(context, OpenFluxVpnService::class.java).setAction(OpenFluxVpnService.STOP))
+                assertEquals("Connection attempt ${it + 1}: $detail", "CONNECTED", state)
+            }
             context.startForegroundService(start)
             Thread.sleep(1000)
             val manager = context.getSystemService(android.app.ActivityManager::class.java)
@@ -34,5 +40,8 @@ class ConnectionSmokeTest {
                 it.service.className == OpenFluxVpnService::class.java.name && it.foreground
             })
         }
+        val holdMs = InstrumentationRegistry.getArguments().getString("paperflux.holdMs")
+            ?.toLongOrNull()?.coerceIn(0L, 120_000L) ?: 0L
+        if (holdMs > 0) Thread.sleep(holdMs)
     }
 }

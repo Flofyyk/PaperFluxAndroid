@@ -6,11 +6,9 @@ import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.Color
 import android.os.Bundle
-import android.view.Gravity
+import android.view.View
 import android.view.WindowManager
 import android.widget.ImageView
-import android.widget.LinearLayout
-import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
@@ -18,7 +16,6 @@ import androidx.core.content.FileProvider
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
-import com.google.android.material.button.MaterialButton
 import com.google.zxing.BarcodeFormat
 import com.google.zxing.EncodeHintType
 import com.google.zxing.qrcode.QRCodeWriter
@@ -37,29 +34,28 @@ class ProfileShareActivity : AppCompatActivity() {
         val config = runCatching { ProfileConfig.export(profile) }.getOrElse {
             Toast.makeText(this, "Не удалось экспортировать профиль", Toast.LENGTH_SHORT).show(); finish(); return
         }
-        val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setBackgroundColor(Color.rgb(8, 7, 13)) }
-        val body = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(22), dp(16), dp(22), dp(24)) }
-        val scroll = ScrollView(this).apply { isFillViewport = true; addView(body) }
-        root.addView(scroll, LinearLayout.LayoutParams(-1, -1))
-        fun text(value: String, size: Float) = TextView(this).apply { text = value; textSize = size; setTextColor(Color.rgb(231, 226, 236)); setPadding(0, dp(8), 0, dp(12)) }
-        fun button(label: String, action: () -> Unit) { body.addView(MaterialButton(this).apply { text = label; minHeight = dp(48); setOnClickListener { action() } }, LinearLayout.LayoutParams(-1, -2)) }
-        body.addView(text("Поделиться профилем", 23f))
-        body.addView(text(profile.getString("name"), 18f))
-        body.addView(text("QR-код и ссылка содержат пароль доступа. Передавайте их только тому, кому разрешаете использовать этот профиль.", 13f))
+        setContentView(R.layout.activity_profile_share)
+        findViewById<TextView>(R.id.share_name).text = profile.getString("name")
+        findViewById<View>(R.id.share_close).setOnClickListener { finish() }
         val qr = runCatching { ProfileQr.bitmap(config) }.getOrNull()
-        if (qr != null) body.addView(ImageView(this).apply {
-            setImageBitmap(qr); setBackgroundColor(Color.WHITE); setPadding(dp(12), dp(12), dp(12), dp(12)); adjustViewBounds = true
-            scaleType = ImageView.ScaleType.FIT_CENTER; contentDescription = "QR-код конфигурации PaperFlux"
-        }, LinearLayout.LayoutParams(-1, -2).apply { gravity = Gravity.CENTER_HORIZONTAL; topMargin = dp(12); bottomMargin = dp(20) })
-        else body.addView(text("Конфигурация слишком большая для QR. Поделитесь ссылкой.", 13f))
-        button("Скопировать ссылку") {
+        if (qr != null) {
+            findViewById<ImageView>(R.id.share_qr).setImageBitmap(qr)
+        } else {
+            findViewById<View>(R.id.share_qr_card).visibility = View.GONE
+            findViewById<View>(R.id.share_qr_unavailable).visibility = View.VISIBLE
+            findViewById<View>(R.id.share_send_qr).visibility = View.GONE
+        }
+        findViewById<View>(R.id.share_copy).setOnClickListener {
             val clip = ClipData.newPlainText("PaperFlux профиль", config)
             if (android.os.Build.VERSION.SDK_INT >= 33) clip.description.extras = android.os.PersistableBundle().apply { putBoolean("android.content.extra.IS_SENSITIVE", true) }
             (getSystemService(CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(clip)
             Toast.makeText(this, "Ссылка скопирована", Toast.LENGTH_SHORT).show()
         }
-        button("Поделиться ссылкой") { startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, config), "Отправить конфигурацию")) }
-        if (qr != null) button("Поделиться QR-кодом") {
+        findViewById<View>(R.id.share_send).setOnClickListener {
+            startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, config), "Отправить конфигурацию"))
+        }
+        findViewById<View>(R.id.share_send_qr).setOnClickListener {
+            if (qr == null) return@setOnClickListener
             runCatching {
                 val directory = File(cacheDir, "shared-profiles").apply { mkdirs() }
                 directory.listFiles()?.filter { it.name.startsWith("profile-") && System.currentTimeMillis() - it.lastModified() > 3_600_000 }?.forEach { it.delete() }
@@ -71,15 +67,13 @@ class ProfileShareActivity : AppCompatActivity() {
                 startActivity(Intent.createChooser(send, "Отправить QR-код"))
             }.onFailure { Toast.makeText(this, "Не удалось отправить QR-код", Toast.LENGTH_SHORT).show() }
         }
-        button("Готово") { finish() }
-        setContentView(root)
+        val root = findViewById<View>(R.id.share_root)
         ViewCompat.setOnApplyWindowInsetsListener(root) { view, insets ->
             val safe = insets.getInsets(WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout())
             view.setPadding(safe.left, safe.top, safe.right, safe.bottom); insets
         }
         ViewCompat.requestApplyInsets(root)
     }
-    private fun dp(value: Int) = (value * resources.displayMetrics.density).toInt()
 }
 
 internal object ProfileQr {

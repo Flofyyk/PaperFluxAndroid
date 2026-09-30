@@ -40,12 +40,35 @@ object NativeAuthBridge {
         for (provider in listOf("yandex", "vyandex")) stored.put(cookieKey(provider, document), values)
         write(file, stored)
     }
-    fun applyPreflightCookies(context: Context, profileId: String, provider: String, documents: List<String>) {
+    fun applyPreflightCookies(context: Context, profileId: String, provider: String, documents: List<String>, namespace: String = profileId) {
         val file = File(context.noBackupFilesDir, "preflight-cookies.json")
-        val pending = read(file) ?: return
-        val target = File(context.noBackupFilesDir, "session-cookies-$profileId.json")
+        val target = File(context.noBackupFilesDir, "session-cookies-$namespace.json")
         val stored = read(target) ?: if (target.exists()) error("Хранилище cookies не удалось прочитать") else JSONObject()
         var changed = false
+        if (!target.exists() && namespace != profileId) {
+            // Preserve only the selected node's document keys from the old
+            // ID-only store; different VPSes can legitimately reuse an ID.
+            val legacy = read(File(context.noBackupFilesDir, "session-cookies-$profileId.json"))
+            for (doc in documents) {
+                val key = cookieKey(provider, doc)
+                legacy?.optJSONObject(key)?.let { stored.put(key, it); changed = true }
+            }
+        }
+        // A newly imported profile can reuse the same Yandex documents under
+        // a different profile ID. Migrate only exact document-key matches; no
+        // unrelated document or provider cookies are copied.
+        val wanted = documents.map { cookieKey(provider, it) }
+        context.noBackupFilesDir.listFiles().orEmpty()
+            .filter { it != target && it.name.matches(Regex("session-cookies-[A-Za-z0-9_-]{1,90}\\.json")) }
+            .take(32).forEach { source ->
+                val previous = read(source) ?: return@forEach
+                for (key in wanted) if (!stored.has(key)) {
+                    previous.optJSONObject(key)?.let { stored.put(key, it); changed = true }
+                }
+            }
+        if (changed) write(target, stored)
+        val pending = read(file) ?: return
+        changed = false
         for (doc in documents) {
             val key = cookieKey(provider, doc)
             pending.optJSONObject(key)?.let { stored.put(key, it); pending.remove(key); changed = true }

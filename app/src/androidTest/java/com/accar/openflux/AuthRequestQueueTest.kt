@@ -27,6 +27,24 @@ class AuthRequestQueueTest {
             assertFalse(NativeAuthBridge.read(File(dir,"preflight-cookies.json"))!!.has(NativeAuthBridge.cookieKey("yandex",doc)))
         } finally { dir.listFiles()?.forEach { it.delete() }; dir.delete() }
     }
+    @Test fun matchingDocumentCookiesSurviveProfileIdChangeWithoutCopyingOthers() {
+        val base = InstrumentationRegistry.getInstrumentation().targetContext
+        val dir = File(base.cacheDir, "cookie-migration-${System.nanoTime()}").apply { mkdir() }
+        val context = object : ContextWrapper(base) { override fun getNoBackupFilesDir(): File = dir }
+        try {
+            val shared = "https://disk.yandex.ru/i/shared"
+            val unrelated = "https://disk.yandex.ru/i/unrelated"
+            val old = JSONObject()
+                .put(NativeAuthBridge.cookieKey("yandex", shared), JSONObject().put("session", "valid"))
+                .put(NativeAuthBridge.cookieKey("yandex", unrelated), JSONObject().put("other", "private"))
+                .put(NativeAuthBridge.cookieKey("vyandex", shared), JSONObject().put("volga", "private"))
+            NativeAuthBridge.write(File(dir, "session-cookies-7.json"), old)
+            NativeAuthBridge.applyPreflightCookies(context, "9", "yandex", listOf(shared))
+            val migrated = requireNotNull(NativeAuthBridge.read(File(dir, "session-cookies-9.json")))
+            assertEquals(1, migrated.length())
+            assertEquals("valid", migrated.getJSONObject(NativeAuthBridge.cookieKey("yandex", shared)).getString("session"))
+        } finally { dir.listFiles()?.forEach { it.delete() }; dir.delete() }
+    }
     private fun request(id: String, remote: Boolean) = JSONObject().put("requestId", id).put("remote", remote)
     @Test fun checksDoNotOverwriteEachOtherAndStaleAcksCannotClearThem() {
         val queue = AuthRequestQueue()

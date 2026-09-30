@@ -39,6 +39,13 @@ class ProfileStore(private val context: Context) {
             row.put("key", profileKey(row))
             if (row.getString("id") == oldActive) data.put("activeId", row.getString("key"))
         }
+        if (rows.length() > 0 && (0 until rows.length()).none {
+                rows.getJSONObject(it).getString("key") == data.optString("activeId")
+            }) {
+            // An older selection key can survive an upgrade or profile replacement.
+            // There is no explicit "none selected" action, so retain a usable profile.
+            data.put("activeId", rows.getJSONObject(0).getString("key"))
+        }
         return data
     }
     private fun write(data: JSONObject) {
@@ -95,7 +102,13 @@ class ProfileStore(private val context: Context) {
         val data = read()
         val rows = data.getJSONArray("profiles")
         for (i in 0 until rows.length()) {
-            rows.getJSONObject(i).apply { remove("token"); put("profileId", getString("id")); put("id", getString("key")) }
+            rows.getJSONObject(i).apply {
+                remove("token")
+                put("serverCount", 1 + (optJSONArray("alternatives")?.length() ?: 0))
+                // Never expose standby credentials to the WebView either.
+                remove("alternatives")
+                put("profileId", getString("id")); put("id", getString("key"))
+            }
         }
         return data.toString()
     }
@@ -128,6 +141,11 @@ class ProfileStore(private val context: Context) {
                 continue
             }
             val edited = JSONObject(current.toString()).put("name", name).put("server", server)
+            if (server != current.optString("server") || documentUrl != current.optString("documentUrl") ||
+                clientIp != current.optString("clientIp") || provider != current.optString("transport") || !replacementToken.isNullOrBlank()) {
+                // Editing a node's credentials must not silently retain an old standby group.
+                edited.remove("alternatives")
+            }
             edited.remove("documentUrls")
             edited.put("documentUrl", documentUrl).put("clientIp", clientIp).put("transport", provider)
             val value = canonical(edited)
@@ -145,10 +163,11 @@ class ProfileStore(private val context: Context) {
     fun delete(id: String) = synchronized(storeLock) {
         val data = read()
         val rows = data.getJSONArray("profiles")
+        val key = find(id).getString("key")
         val next = JSONArray()
-        for (i in 0 until rows.length()) if (rows.getJSONObject(i).getString("key") != id) next.put(rows.getJSONObject(i))
+        for (i in 0 until rows.length()) if (rows.getJSONObject(i).getString("key") != key) next.put(rows.getJSONObject(i))
         data.put("profiles", next)
-        if (data.optString("activeId") == id) data.put("activeId", if (next.length() > 0) next.getJSONObject(0).getString("key") else "")
+        if (data.optString("activeId") == key) data.put("activeId", if (next.length() > 0) next.getJSONObject(0).getString("key") else "")
         write(data)
         mirror(active())
     }

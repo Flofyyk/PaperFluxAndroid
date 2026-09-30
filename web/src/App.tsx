@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { AppExceptionItem, PaperFluxProfile, TabId, VpnSettings } from "./types";
 import { DEFAULT_APPS, DEFAULT_SETTINGS } from "./data/defaults";
 import { useVpn } from "./hooks/useVpn";
@@ -11,14 +11,35 @@ import { LogsScreen } from "./screens/LogsScreen";
 import { SettingsScreen } from "./screens/SettingsScreen";
 import { ProfilesScreen } from "./screens/ProfilesScreen";
 
+type Inspection = { id: string; address?: string; countryCode?: string; latencyMs?: number; error?: string; checking?: boolean; pinged?: boolean };
+
 export default function App() {
   const [dark] = useState(true);
   const [activeTab, setActiveTab] = useState<TabId>("home");
 
   const [settings, setSettings] = useState<VpnSettings>(DEFAULT_SETTINGS);
   const [apps, setApps] = useState<AppExceptionItem[]>(DEFAULT_APPS);
+  const appsRef = useRef<AppExceptionItem[]>(DEFAULT_APPS);
   const [profiles, setProfiles] = useState<PaperFluxProfile[]>([]);
   const [activeProfile, setActiveProfile] = useState("");
+  const [inspections, setInspections] = useState<Record<string, Inspection>>({});
+  const inspected = useRef(new Set<string>());
+  const inspectProfile = useCallback((id: string, force = false) => {
+    const native = (window as Window & { PaperFluxNative?: { inspectProfile?: (id: string, ping: boolean) => void } }).PaperFluxNative;
+    if (!id || !native?.inspectProfile || (inspected.current.has(id) && !force)) return;
+    inspected.current.add(id);
+    setInspections(current => ({ ...current, [id]: { ...current[id], id, checking: force, pinged: force || current[id]?.pinged } }));
+    native.inspectProfile(id, force);
+  }, []);
+  useEffect(() => {
+    const win = window as Window & { __paperFluxOnProfileInspection?: (raw: string) => void };
+    win.__paperFluxOnProfileInspection = raw => {
+      try { const result = JSON.parse(raw) as Inspection; setInspections(current => ({ ...current, [result.id]: { ...current[result.id], ...result, checking: false } })); }
+      catch { /* Diagnostics cannot affect connection state. */ }
+    };
+    return () => { delete win.__paperFluxOnProfileInspection; };
+  }, []);
+  useEffect(() => { if (activeProfile) inspectProfile(activeProfile); }, [activeProfile, inspectProfile]);
 
   const refreshProfiles = useCallback(() => {
     const native = (window as unknown as { PaperFluxNative?: { getProfiles?: () => string } }).PaperFluxNative;
@@ -80,7 +101,7 @@ export default function App() {
     const loadApps = () => {
       try {
         const parsed = JSON.parse(native.getInstalledApps!());
-        if (Array.isArray(parsed) && parsed.length) setApps(parsed);
+        if (Array.isArray(parsed)) { appsRef.current = parsed; setApps(parsed); }
       } catch { /* native bridge unavailable during preview */ }
     };
     // First response is deliberately icon-free; two light retries replace it
@@ -101,18 +122,20 @@ export default function App() {
     }
   }, []);
 
-  const toggleApp = useCallback((id: string, value: boolean) => {
-    setApps((prev) => {
-      const next = prev.map((a) => (a.id === id ? { ...a, excluded: value } : a));
-      const native = (window as unknown as { PaperFluxNative?: { setExcludedApps?: (raw: string) => void } }).PaperFluxNative;
-      native?.setExcludedApps?.(JSON.stringify(next.filter((a) => a.excluded).map((a) => a.pkg)));
-      return next;
-    });
+  const toggleApp = useCallback((id: string, value: boolean): string => {
+    const next = appsRef.current.map((a) => (a.id === id ? { ...a, excluded: value } : a));
+    const native = (window as unknown as { PaperFluxNative?: { setExcludedApps?: (raw: string) => string } }).PaperFluxNative;
+    const result = native?.setExcludedApps?.(JSON.stringify(next.filter((a) => a.excluded).map((a) => a.pkg))) ?? "";
+    if (result.startsWith("Ошибка")) return result;
+    appsRef.current = next;
+    setApps(next);
+    return result;
   }, []);
 
   const resetSettings = useCallback(() => {
     setSettings(DEFAULT_SETTINGS);
     setApps(DEFAULT_APPS);
+    appsRef.current = DEFAULT_APPS;
     const native = (window as unknown as { PaperFluxNative?: { setExcludedApps?: (raw: string) => void } }).PaperFluxNative;
     native?.setExcludedApps?.("[]");
     (window as unknown as { PaperFluxNative?: { setAutoReconnect?: (enabled: boolean) => void } }).PaperFluxNative?.setAutoReconnect?.(DEFAULT_SETTINGS.autoReconnect);
@@ -127,6 +150,7 @@ export default function App() {
       vpn.disconnect();
     }
   }, [vpn.connect, vpn.disconnect, vpn.status]);
+  const selectedProfile = profiles.find(profile => profile.id === activeProfile);
 
   return (
     <div className={dark ? "pf-dark pf-app-shell w-full" : "pf-app-shell w-full"}>
@@ -139,14 +163,14 @@ export default function App() {
                 stages={vpn.stages}
                 stats={vpn.stats}
                 errorReason={vpn.errorReason}
-                profile={profiles.find((profile) => profile.id === activeProfile)}
+                profile={selectedProfile && { ...selectedProfile, countryCode: inspections[activeProfile]?.countryCode }}
                 onOpenProfiles={() => setActiveTab("profiles")}
                 onToggleConnection={handleToggleConnection}
                 onRetry={vpn.retry}
               />
             )}
             {activeTab === "logs" && <LogsScreen logs={vpn.logs} onClear={vpn.clearLogs} />}
-            {activeTab === "profiles" && <ProfilesScreen profiles={profiles} activeId={activeProfile} onClipboard={addProfileFromClipboard} onPickFile={pickProfileFile} onQr={scanProfileQr} onSave={saveProfile} onSelect={id => changeProfile(id)} onDelete={id => changeProfile(id, true)} onRefresh={refreshProfiles} />}
+            {activeTab === "profiles" && <ProfilesScreen profiles={profiles} activeId={activeProfile} inspections={inspections} onInspect={inspectProfile} onClipboard={addProfileFromClipboard} onPickFile={pickProfileFile} onQr={scanProfileQr} onSave={saveProfile} onSelect={id => changeProfile(id)} onDelete={id => changeProfile(id, true)} onRefresh={refreshProfiles} />}
             {activeTab === "settings" && (
               <SettingsScreen
                 settings={settings}

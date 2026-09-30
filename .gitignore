@@ -14,3 +14,11 @@ captures/
 web/node_modules/
 web/dist/
 *.hprof
+/app/src/main/assets/openflux-worker
+/app/src/main/jniLibs/*/libopenflux-worker.so
+.env*
+*.db
+*.db-wal
+*.db-shm
+*.pem
+*.key

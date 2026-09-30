@@ -111,7 +111,7 @@ class QrScanActivity : AppCompatActivity() {
 internal object QrProfilePayload {
     // QR data is untrusted. MainActivity still validates every field before saving.
     fun accepts(value: String): Boolean = value.length in 1..16_384 &&
-        (value.startsWith("paperflux://config?") || runCatching {
+        (value.startsWith("paperflux://config?") || value.startsWith("paperflux://pool?") || runCatching {
             val json = org.json.JSONObject(value)
             json.has("id") && json.has("token") && (json.has("documentUrl") || json.has("documentUrls") || json.has("doc"))
         }.getOrDefault(false))

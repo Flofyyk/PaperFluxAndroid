@@ -21,7 +21,7 @@ export const SettingsScreen = memo(function SettingsScreen({
   settings: VpnSettings;
   onUpdate: <K extends keyof VpnSettings>(key: K, value: VpnSettings[K]) => void;
   apps: AppExceptionItem[];
-  onToggleApp: (id: string, value: boolean) => void;
+  onToggleApp: (id: string, value: boolean) => string;
   onReset: () => void;
 }) {
   const { show } = useToast();
@@ -118,14 +118,17 @@ export const SettingsScreen = memo(function SettingsScreen({
 
         <SettingsSection title="Исключения приложений">
           <p className="pb-2 pt-1 text-[12px] leading-snug text-on-surface-variant">
-            Трафик выбранных приложений идёт в обход туннеля PaperFlux
+            Выбранные приложения используют обычный интернет. Активный VPN кратко переподключится, чтобы применить изменения.
           </p>
           <input value={appQuery} onChange={(e) => setAppQuery(e.target.value)} placeholder="Поиск приложений" className="mb-2 w-full rounded-xl bg-surface-container-high px-3.5 py-2.5 text-[13px] text-on-surface outline-none ring-1 ring-outline/30 placeholder:text-on-surface-variant focus:ring-primary/70" />
           <div ref={appList} onScroll={(event) => setAppScrollTop(event.currentTarget.scrollTop)} className="max-h-72 overflow-y-auto rounded-2xl bg-surface-container-low px-3 ring-1 ring-outline/20">
             {visibleApps.length ? (
               <div style={{ height: visibleApps.length * APP_ROW_HEIGHT }}>
                 <div style={{ transform: `translateY(${firstApp * APP_ROW_HEIGHT}px)` }}>
-                  {renderedApps.map((app) => <AppExceptionRow key={app.id} app={app} onToggle={onToggleApp} />)}
+                  {renderedApps.map((app) => <AppExceptionRow key={app.id} app={app} onToggle={(id, value) => {
+                    const result = onToggleApp(id, value);
+                    if (result) show(result);
+                  }} />)}
                 </div>
               </div>
             ) : <p className="py-5 text-center text-[12px] text-on-surface-variant">Приложения не найдены</p>}

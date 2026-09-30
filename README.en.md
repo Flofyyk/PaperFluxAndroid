@@ -34,7 +34,8 @@ To connect, scan a QR code with the built-in camera scanner, import a configurat
 - Profiles with selection, editing and deletion; QR, clipboard and file import or manual entry.
 - Profile sharing with a locally generated QR code, link copying and the Android share sheet for links or QR images. Shared configurations contain the access key: send them only to trusted recipients.
 - An in-app QR scanner with a flashlight. Decoding is local, without Google Lens or Google Play Services; images are neither stored nor uploaded.
-- Per-app exclusions: selected applications bypass the VPN. Reconnect after changing the list.
+- Per-app exclusions are persisted and applied automatically with a brief VPN reconnect. Restart an excluded app if it retains old connections. Routing exclusions do not hide the system-wide presence of a VPN.
+- Collapsible profile actions, country flags when address lookup succeeds, and ICMP server latency checks. Blocked ICMP does not mean the VPN is unavailable.
 - Yandex Docs transport with authenticated tunnel readiness checks and reconnection handling.
 - Foreground notification with connection state, traffic totals and a disconnect action.
 - Profile secrets stored in encrypted device storage.
@@ -51,11 +52,11 @@ Choose **universal** if unsure about your device architecture. Architecture-spec
 
 ## Transports and recovery
 
-Android 0.4.15 is compatible with PaperFlux Server 0.5.6–0.5.7 using `--session`. Session uses batched/zstd and is not interchangeable with the legacy PFS2 protocol. Enable the profile discovery service for address-and-key setup; complete configuration import does not require it.
+Android 0.4.16 is compatible with PaperFlux Server 0.5.6–0.5.8 using `--session`. Upgrade grouped proxy servers to 0.5.8 to prevent stale flows from accumulating after reconnects. Session uses batched/zstd and is not interchangeable with the legacy PFS2 protocol. Enable the profile discovery service for address-and-key setup; complete configuration import does not require it.
 
-The interface lists Yandex once, alongside Cups.online and Mail.ru Docs. Imported profiles retain their underlying Yandex protocol type. Volga profiles still require a separate empty document because that transport modifies document content.
+New profiles offer Yandex and Mail.ru Docs. Imported profiles retain their underlying Yandex protocol type. Volga profiles require a separate empty document because that transport modifies document content.
 
-Manual Yandex verification buttons have been removed from the interface and notification. Internal cookie/service authorization compatibility remains, but Session does not bypass Yandex CAPTCHA requirements: an access challenge may prevent a connection until resolved. The service channel is not used for regular VPN traffic. See [server transport configuration](https://github.com/Flofyyk/PaperFlux/blob/main/docs/TRANSPORTS.md).
+Yandex access challenges open in a dedicated verification window. Document requests are queued, initial and redirected-page cookies are collected, and user verification is separate from connection timeouts. Session does not bypass Yandex CAPTCHA requirements. The service channel is not used for regular VPN traffic. See [server transport configuration](https://github.com/Flofyyk/PaperFlux/blob/main/docs/TRANSPORTS.md).
 
 A restored document channel triggers an immediate DNS/TCP check. Restarted servers must answer a fresh cryptographic challenge before replacing the peer session. Brief interruptions no longer force an unnecessary VPN restart, and repeated service starts preserve foreground status.
 
@@ -66,7 +67,7 @@ A restored document channel triggers an immediate DNS/TCP check. Restarted serve
 3. Select a profile and tap the connect button on the home screen.
 4. On first connection, approve the Android VPN permission dialog.
 
-To bypass the VPN for specific apps, select them under Settings → App exclusions and reconnect.
+To bypass the VPN for specific apps, select them under Settings → App exclusions. Changes are applied automatically. Restart the excluded app if it retains old connections.
 
 The matching server source is in [PaperFlux Server](https://github.com/Flofyyk/PaperFlux). The project started from [p1neappleXpress/OpenFlux](https://github.com/p1neappleXpress/OpenFlux); PaperFlux Android is maintained as a separate client.
 

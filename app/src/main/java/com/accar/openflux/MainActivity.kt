@@ -51,7 +51,9 @@ import java.io.ByteArrayOutputStream
 import java.security.SecureRandom
 
 class MainActivity : AppCompatActivity() {
+    private var openedAuthRequestId: String? = null
     @Volatile private var profileLoader: ProfileBootstrapClient? = null
+    private val profileDiagnosticsExecutor = java.util.concurrent.Executors.newSingleThreadExecutor()
     private val profileRequestGeneration = java.util.concurrent.atomic.AtomicLong()
     private var designWeb: WebView? = null
     @Volatile private var installedAppsCache: String? = null
@@ -139,7 +141,12 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         WindowCompat.setDecorFitsSystemWindows(window, false)
         // App labels are cheap; icons are requested lazily by the WebView.
-        Thread { installedAppsCache = installedAppsJson(includeIcons = false) }.start()
+        Thread {
+            runCatching {
+                AppRoutingStore(this).migrate()
+                installedAppsCache = installedAppsJson(includeIcons = false)
+            }.onFailure { android.util.Log.e("PaperFluxApps", "Cannot load application routing", it) }
+        }.start()
         buildWebUi()
     }
     override fun onStart() {
@@ -148,9 +155,22 @@ class MainActivity : AppCompatActivity() {
         val snapshot = TunnelSnapshot.read(this)
         sendWebState(snapshot.optString("state"), snapshot.optString("detail"), duration = snapshot.optLong("durationSec", -1L), rx = snapshot.optLong("rxBytes", -1L), tx = snapshot.optLong("txBytes", -1L), ping = snapshot.optLong("ping", -1L))
     }
+    override fun onResume() {
+        super.onResume()
+        val request = NativeAuthBridge.read(java.io.File(noBackupFilesDir, "auth-request.json")) ?: return
+        val requestId = request.optString("requestId")
+        if (requestId.isBlank() || requestId == openedAuthRequestId) return
+        val vpnAlive = getSystemService(android.app.ActivityManager::class.java)
+            .runningAppProcesses?.any { it.processName == "$packageName:vpn" } == true
+        if (!vpnAlive) return
+        if (TunnelSnapshot.read(this).optString("state") == "CONNECTED") return
+        openedAuthRequestId = requestId
+        startActivity(Intent(this, YandexAuthActivity::class.java))
+    }
     override fun onStop() { runCatching { unregisterReceiver(stateReceiver) }; super.onStop() }
     override fun onDestroy() {
         cancelProfileRequest()
+        profileDiagnosticsExecutor.shutdownNow()
         designWeb?.removeJavascriptInterface("PaperFluxNative")
         designWeb?.destroy()
         designWeb = null
@@ -335,6 +355,16 @@ class MainActivity : AppCompatActivity() {
         @JavascriptInterface fun shareProfile(id: String) = runOnUiThread {
             startActivity(Intent(this@MainActivity, ProfileShareActivity::class.java).putExtra("profile-key", id))
         }
+        @JavascriptInterface fun inspectProfile(id: String, ping: Boolean) {
+            profileDiagnosticsExecutor.execute {
+                val result = runCatching { ProfileDiagnostics(this@MainActivity).inspect(id, ping) }
+                    .getOrElse { org.json.JSONObject().put("id", id).put("error", "Не удалось проверить сервер") }
+                runOnUiThread {
+                    if (!isDestroyed) designWeb?.evaluateJavascript(
+                        "window.__paperFluxOnProfileInspection&&window.__paperFluxOnProfileInspection(${org.json.JSONObject.quote(result.toString())})", null)
+                }
+            }
+        }
         @JavascriptInterface fun pickConfigFile() = runOnUiThread {
             profileFilePicker.launch(arrayOf("text/plain", "application/json", "application/octet-stream"))
         }
@@ -359,30 +389,35 @@ class MainActivity : AppCompatActivity() {
         @JavascriptInterface fun getState(): String = TunnelSnapshot.read(this@MainActivity).toString()
         @JavascriptInterface fun getSessionLogs(): String = SessionJournal.read(this@MainActivity)
         @JavascriptInterface fun clearSessionLogs() { SessionJournal.clear(this@MainActivity) }
-        @JavascriptInterface fun getInstalledApps(): String = installedAppsCache ?: installedAppsJson(includeIcons = false)
+        @JavascriptInterface fun getInstalledApps(): String {
+            val apps = org.json.JSONArray(installedAppsCache ?: installedAppsJson(includeIcons = false))
+            val excluded = AppRoutingStore(this@MainActivity).read()
+            for (i in 0 until apps.length()) apps.getJSONObject(i).let { it.put("excluded", it.getString("pkg") in excluded) }
+            return apps.toString()
+        }
         @JavascriptInterface fun getAppIcon(pkg: String): String = runCatching {
             drawableDataUri(packageManager.getApplicationIcon(pkg))
         }.getOrDefault("")
-        @JavascriptInterface fun setExcludedApps(raw: String) {
-            runCatching {
-                val values = mutableSetOf<String>()
-                val array = org.json.JSONArray(raw)
-                for (i in 0 until array.length()) array.optString(i).takeIf { it.isNotBlank() }?.let(values::add)
-                getSharedPreferences(OpenFluxVpnService.PREFS, MODE_PRIVATE).edit().putStringSet(OpenFluxVpnService.EXCLUDED_APPS, values).apply()
-                installedAppsCache = null
-                Thread { installedAppsCache = installedAppsJson(includeIcons = false) }.start()
-            }
-        }
+        @JavascriptInterface fun setExcludedApps(raw: String): String = try {
+            saveAppExclusions(AppRoutingStore.decode(raw))
+        } catch (error: Exception) { "Ошибка: некорректный список исключений" }
     }
 
+    private fun saveAppExclusions(values: Set<String>): String = try {
+        AppRoutingStore(this).save(values)
+        runOnUiThread {
+            startService(Intent(this, OpenFluxVpnService::class.java).setAction(OpenFluxVpnService.UPDATE_APP_ROUTING))
+        }
+        "Исключения сохранены"
+    } catch (error: Exception) { "Ошибка: не удалось сохранить исключения" }
+
     private fun installedAppsJson(includeIcons: Boolean): String {
-        val excluded = getSharedPreferences(OpenFluxVpnService.PREFS, MODE_PRIVATE).getStringSet(OpenFluxVpnService.EXCLUDED_APPS, emptySet()).orEmpty()
-        val launcher = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
-        val apps = packageManager.queryIntentActivities(launcher, 0)
-            .map { it.activityInfo.applicationInfo }
-            .distinctBy { it.packageName }
-            .filter { it.packageName != packageName }
-            .sortedWith { left, right -> Collator.getInstance(Locale.getDefault()).compare(packageManager.getApplicationLabel(left).toString(), packageManager.getApplicationLabel(right).toString()) }
+        val excluded = AppRoutingStore(this).read()
+        val collator = Collator.getInstance(Locale.getDefault())
+        val apps = packageManager.getInstalledApplications(0)
+            .filter { it.packageName != packageName && (it.packageName in excluded ||
+                packageManager.checkPermission(android.Manifest.permission.INTERNET, it.packageName) == android.content.pm.PackageManager.PERMISSION_GRANTED) }
+            .sortedWith { left, right -> collator.compare(packageManager.getApplicationLabel(left).toString(), packageManager.getApplicationLabel(right).toString()) }
         val result = org.json.JSONArray()
         apps.forEach { app ->
             val obj = org.json.JSONObject()
@@ -582,18 +617,25 @@ class MainActivity : AppCompatActivity() {
     private fun showExclusionsDialog() {
         val intent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
         val apps = packageManager.queryIntentActivities(intent, 0).map { it.activityInfo.applicationInfo }.distinctBy { it.packageName }.filter { it.packageName != packageName }.sortedBy { packageManager.getApplicationLabel(it).toString().lowercase(Locale.getDefault()) }
-        val selected = getSharedPreferences(OpenFluxVpnService.PREFS, MODE_PRIVATE).getStringSet(OpenFluxVpnService.EXCLUDED_APPS, emptySet()).orEmpty().toMutableSet()
+        val selected = AppRoutingStore(this).read().toMutableSet()
         val labels = apps.map { packageManager.getApplicationLabel(it).toString() }.toTypedArray()
         val states = apps.map { it.packageName in selected }.toBooleanArray()
         androidx.appcompat.app.AlertDialog.Builder(this)
             .setTitle("Исключения из VPN")
             .setMultiChoiceItems(labels, states) { _, which, checked -> if (checked) selected.add(apps[which].packageName) else selected.remove(apps[which].packageName) }
             .setNegativeButton("Отмена", null)
-            .setPositiveButton("Сохранить") { _, _ -> getSharedPreferences(OpenFluxVpnService.PREFS, MODE_PRIVATE).edit().putStringSet(OpenFluxVpnService.EXCLUDED_APPS, selected).apply() }
+            .setPositiveButton("Сохранить") { _, _ -> saveAppExclusions(selected) }
             .show()
     }
 
     private fun requestConnect() {
+        val profile = runCatching { ProfileStore(this).active() }.getOrNull()
+        val link = profile?.optString("documentUrl").orEmpty()
+        val provider = profile?.optString("transport", "yandex") ?: "yandex"
+        if (profile == null || !validResource(provider, splitDocumentUrls(link))) {
+            sendWebState("ERROR", "Выберите действующий профиль перед подключением")
+            return
+        }
         // A session journal must describe only the current connection attempt.
         // Do not replay a refused/timeout event from a previous VPN session.
         getSharedPreferences(OpenFluxVpnService.PREFS, MODE_PRIVATE).edit()
@@ -601,15 +643,6 @@ class MainActivity : AppCompatActivity() {
             .putString("state", "CONNECTING")
             .putString("detail", "Запускаем новую сессию")
             .apply()
-        val link = if (::transportLink.isInitialized) transportLink.text?.toString()?.trim().orEmpty()
-        else getSharedPreferences(OpenFluxVpnService.PREFS, MODE_PRIVATE).getString("document", "").orEmpty()
-        val provider = ProfileStore(this).active()?.optString("transport", "yandex") ?: "yandex"
-        if (!validResource(provider, splitDocumentUrls(link))) {
-            getSharedPreferences(OpenFluxVpnService.PREFS, MODE_PRIVATE).edit().putString("state", "DISCONNECTED").apply()
-            sendWebState("ERROR", "Добавьте профиль перед подключением")
-            return
-        }
-        getSharedPreferences(OpenFluxVpnService.PREFS, MODE_PRIVATE).edit().putString("document", link).apply()
         val request = VpnService.prepare(this)
         if (request == null) requestNotificationThenStart() else permission.launch(request)
     }
@@ -620,10 +653,8 @@ class MainActivity : AppCompatActivity() {
         } else startOpenFlux()
     }
     private fun startOpenFlux() {
-        val link = if (::transportLink.isInitialized) transportLink.text?.toString()?.trim().orEmpty()
-        else getSharedPreferences(OpenFluxVpnService.PREFS, MODE_PRIVATE).getString("document", "").orEmpty()
         if (::connectButton.isInitialized) renderState("CONNECTING", "Запрашиваем разрешение и запускаем туннель")
-        startForegroundService(Intent(this, OpenFluxVpnService::class.java).setAction(OpenFluxVpnService.START).putExtra(OpenFluxVpnService.EXTRA_DOCUMENT_URL, link))
+        startForegroundService(Intent(this, OpenFluxVpnService::class.java).setAction(OpenFluxVpnService.START))
     }
     private fun renderState(state: String, detail: String) {
         currentState = state
