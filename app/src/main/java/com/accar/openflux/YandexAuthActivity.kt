@@ -39,6 +39,7 @@ class YandexAuthActivity : AppCompatActivity() {
     private var currentUrl = ""
     private var pageFailed = false
     private var submitted = false
+    private var checkingPage = false
     private val directExecutor = Executor { it.run() }
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -64,7 +65,8 @@ class YandexAuthActivity : AppCompatActivity() {
             val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout() or WindowInsetsCompat.Type.ime())
             view.setPadding(bars.left, bars.top, bars.right, bars.bottom); insets
         }
-        findViewById<TextView>(R.id.auth_origin).text = if (remote) "ДЛЯ СЕРВЕРА" else "ДЛЯ ТЕЛЕФОНА"
+        val carrier = YandexVerificationPolicy.carrierLabel(pending?.optString("transport").orEmpty())
+        findViewById<TextView>(R.id.auth_origin).text = "${if (remote) "VPS" else "ТЕЛЕФОН"} · $carrier"
         findViewById<TextView>(R.id.auth_description).text = if (remote)
             "Яндекс запросил подтверждение для VPS. Страница открывается через защищённый служебный канал; после проверки соединение продолжится само."
         else "Яндекс запросил подтверждение на телефоне. Завершите его на странице ниже — результат передастся автоматически."
@@ -110,7 +112,7 @@ class YandexAuthActivity : AppCompatActivity() {
                 override fun onPageFinished(view: WebView, url: String) {
                     currentUrl = url
                     if (pageFailed) return
-                    setStatus(if (isCheckpoint(url)) "Пройдите проверку на странице Яндекса" else if (pending != null) "Проверка завершена. Передаём результат…" else "Страница открыта. Нажмите «Я прошёл проверку»")
+                    setStatus(if (isCheckpoint(url)) "Пройдите проверку на странице Яндекса" else if (pending != null) "Страница открыта. Проверяем результат…" else "Страница открыта. Нажмите «Я прошёл проверку»")
                     if (pending != null && !pageFailed && !isCheckpoint(url)) view.postDelayed({
                         if (!isFinishing && !pageFailed && currentUrl == url && !isCheckpoint(currentUrl)) saveCookies()
                     }, 1500)
@@ -155,18 +157,43 @@ class YandexAuthActivity : AppCompatActivity() {
         setStatus("Не удалось открыть страницу", Color.rgb(255, 177, 177))
     }
     private fun isAllowedYandexUrl(uri: Uri): Boolean {
-        val host = uri.host.orEmpty()
-        return uri.scheme == "https" && uri.userInfo == null && uri.port == -1 &&
-            (host == "yandex.ru" || host.endsWith(".yandex.ru") || host == "yandex.com" ||
-                host.endsWith(".yandex.com") || host == "smartcaptcha.yandexcloud.net")
+        return YandexVerificationPolicy.allows(uri.toString())
     }
     private fun requestRoute(remote: Boolean) = "${pending?.optString("attempt").orEmpty()}/$remote"
     private fun saveCookies() {
-        if (submitted) return
-        if (isCheckpoint(currentUrl) || pageFailed) {
+        if (submitted || checkingPage) return
+        if (!YandexVerificationPolicy.allows(currentUrl) || isCheckpoint(currentUrl) || pageFailed) {
             setStatus("Сначала завершите проверку на странице Яндекса", Color.rgb(255, 177, 177))
             return
         }
+        val web = browser ?: return
+        val checkedUrl = currentUrl
+        checkingPage = true
+        // A challenge may be embedded at an ordinary document URL. URL alone
+        // and pre-existing root cookies are not proof that it has been solved.
+        // This returns a boolean only; no page data enters the app or logs.
+        web.evaluateJavascript("""
+            (function() {
+                if (document.readyState !== 'complete') return false;
+                if (/captcha|подтвердите,? что вы не робот|проверка безопасности/i.test(document.title)) return false;
+                var nodes = document.querySelectorAll('.SmartCaptcha,.CheckboxCaptcha,.captcha,form[action*="checkcaptcha"],iframe[src*="smartcaptcha"]');
+                for (var i = 0; i < nodes.length; i++) {
+                    var style = getComputedStyle(nodes[i]);
+                    if (nodes[i].getClientRects().length && style.visibility !== 'hidden' && style.display !== 'none') return false;
+                }
+                return true;
+            })()
+        """.trimIndent()) { result ->
+            checkingPage = false
+            if (isFinishing || isDestroyed || submitted || pageFailed || currentUrl != checkedUrl) return@evaluateJavascript
+            if (result != "true") {
+                setStatus("Завершите проверку и дождитесь открытия документа")
+                return@evaluateJavascript
+            }
+            persistCookies()
+        }
+    }
+    private fun persistCookies() {
         val jar = CookieManager.getInstance()
         pending?.let { request ->
             val live = NativeAuthBridge.read(File(noBackupFilesDir, "auth-request.json"))
@@ -176,27 +203,18 @@ class YandexAuthActivity : AppCompatActivity() {
             }
             val values = JSONObject()
             jar.flush()
-            for (cookieUrl in (listOf(startUrl, currentUrl) + listOf("disk.yandex.ru", "docs.yandex.ru", "yandex.ru").map { "https://$it/" }).distinct()) {
-                jar.getCookie(cookieUrl).orEmpty().split(';').forEach { part ->
-                    val split = part.indexOf('=')
-                    if (split > 0) values.put(part.substring(0, split).trim(), part.substring(split + 1).trim())
-                }
-            }
+            YandexVerificationPolicy.collect(startUrl, currentUrl, jar::getCookie).forEach { (name, value) -> values.put(name, value) }
             if (values.length() == 0) { setStatus("Сначала пройдите проверку Яндекса", Color.rgb(255, 177, 177)); return }
             val offer = JSONObject().put("attempt", request.optString("attempt")).put("requestId", request.optString("requestId")).put("transport", request.optString("transport"))
                 .put("remote", request.optBoolean("remote")).put("jar", values)
+            YandexVerificationPolicy.cookieDomain(currentUrl)?.let { offer.put("domain", it) }
             runCatching { NativeAuthBridge.write(File(noBackupFilesDir, "auth-offer.json"), offer); jar.flush() }
-                .onSuccess { submitted = true; setStatus("Результат передан. Соединение продолжится само", Color.rgb(130, 220, 170)); browser?.postDelayed({ finish() }, 900) }
+                .onSuccess { submitted = true; setStatus("Результат передан. Проверяем доступ к Яндексу", Color.rgb(130, 220, 170)); browser?.postDelayed({ finish() }, 900) }
                 .onFailure { setStatus("Не удалось передать результат. Попробуйте ещё раз", Color.rgb(255, 177, 177)) }
             return
         }
         val values = JSONObject()
-        for (cookieUrl in (listOf(startUrl, currentUrl) + listOf("https://disk.yandex.ru/", "https://docs.yandex.ru/", "https://yandex.ru/")).distinct()) {
-            jar.getCookie(cookieUrl).orEmpty().split(';').forEach { part ->
-                val split = part.indexOf('=')
-                if (split > 0) values.put(part.substring(0, split).trim(), part.substring(split + 1).trim())
-            }
-        }
+        YandexVerificationPolicy.collect(startUrl, currentUrl, jar::getCookie).forEach { (name, value) -> values.put(name, value) }
         if (values.length() == 0) { setStatus("Сначала пройдите проверку Яндекса", Color.rgb(255, 177, 177)); return }
         runCatching {
             NativeAuthBridge.savePreflightCookies(this, startUrl, values)
@@ -206,9 +224,7 @@ class YandexAuthActivity : AppCompatActivity() {
         }.onFailure { setStatus("Не удалось сохранить проверку", Color.rgb(255, 177, 177)) }
     }
     private fun isCheckpoint(raw: String): Boolean {
-        val uri = Uri.parse(raw)
-        return raw.isBlank() || uri.path.orEmpty().contains("captcha", ignoreCase = true) ||
-            uri.host.orEmpty().startsWith("passport.") || uri.host == "smartcaptcha.yandexcloud.net"
+        return YandexVerificationPolicy.isCheckpoint(raw)
     }
     private fun cancelCheck() {
         pending?.let { request ->

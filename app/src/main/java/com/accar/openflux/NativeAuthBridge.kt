@@ -15,10 +15,11 @@ import java.security.MessageDigest
 /** One visible check, independent local/server identities, bounded waiting list. */
 internal class AuthRequestQueue {
     private val requests = LinkedHashMap<String, JSONObject>()
+    private val completed = LinkedHashSet<String>()
     fun current(): JSONObject? = requests.values.firstOrNull()
     fun accept(request: JSONObject): Boolean {
         val id = request.optString("requestId")
-        if (id.isEmpty()) return false
+        if (id.isEmpty() || id in completed) return false
         val empty = requests.isEmpty()
         if (requests.containsKey(id) || requests.size < 8) requests[id] = request
         return empty && requests.isNotEmpty()
@@ -26,6 +27,10 @@ internal class AuthRequestQueue {
     fun acknowledge(id: String): Boolean {
         val active = requests.keys.firstOrNull() == id
         requests.remove(id)
+        if (id.isNotEmpty()) {
+            completed.add(id)
+            if (completed.size > 64) completed.remove(completed.first())
+        }
         return active
     }
 }
@@ -85,7 +90,7 @@ object NativeAuthBridge {
         val atomic = AtomicFile(file); val out = atomic.startWrite()
         try { out.write(bytes); atomic.finishWrite(out) } catch (e: Exception) { atomic.failWrite(out); throw e }
     }
-    fun start(context: Context, socketPath: String, child: Process, current: () -> Boolean, onRequest: (Boolean) -> Unit, onUpdated: () -> Unit) {
+    fun start(context: Context, socketPath: String, child: Process, current: () -> Boolean, onRequest: (JSONObject) -> Unit, onUpdated: () -> Unit) {
         val requestFile = File(context.noBackupFilesDir, "auth-request.json")
         val offerFile = File(context.noBackupFilesDir, "auth-offer.json")
         val commandFile = File(context.noBackupFilesDir, "auth-command.json")
@@ -95,7 +100,7 @@ object NativeAuthBridge {
         fun displayNext() {
             val next = queue.current()
             if (next == null) { requestFile.delete(); onUpdated() }
-            else { write(requestFile, next); onRequest(next.optBoolean("remote")) }
+            else { write(requestFile, next); onRequest(next) }
         }
         Thread({
             while (child.isAlive && current()) {

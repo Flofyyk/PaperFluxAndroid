@@ -289,17 +289,24 @@ class OpenFluxVpnService : VpnService() {
                 directory(filesDir); redirectErrorStream(true)
                 environment()["LD_LIBRARY_PATH"] = applicationInfo.nativeLibraryDir
                 environment()["PAPERFLUX_SESSION_COOKIES"] = File(noBackupFilesDir, "session-cookies-$cookieNamespace.json").absolutePath
+                if (provider == "mailru") {
+                    environment()["PAPERFLUX_TCP_RECOVERY"] = "default"
+                    environment()["PAPERFLUX_TCP_BUFFER_KIB"] = "1024"
+                    environment()["PAPERFLUX_TCP_BUFFER_MAX_KIB"] = "1024"
+                }
             }.start()
             publish("TRANSPORT", if (provider == "yandex" && volgaUrl.isNotEmpty()) "Подключаем Яндекс Документы и резерв Volga" else if (provider == "yandex" && documentUrls.size > 1) "Подключаем ${documentUrls.size} канала Яндекс Документов" else "Подключаем $providerName")
             // Do not leave the child pipe unread: Go debug output would fill
             // it and freeze the transport. Keeping it in logcat also makes a
             // failed Yandex handshake diagnosable without exposing it in UI.
             val child = process ?: error("Не удалось запустить OpenFlux")
-            NativeAuthBridge.start(this, authSocket, child, { current() && process === child }, { remote ->
-                authActionRequired = if (remote) "Яндекс требует подтверждение доступа на сервере" else "Яндекс требует подтверждение доступа на телефоне"
+            NativeAuthBridge.start(this, authSocket, child, { current() && process === child }, { request ->
+                val location = if (request.optBoolean("remote")) "VPS" else "телефон"
+                val carrier = YandexVerificationPolicy.carrierLabel(request.optString("transport"))
+                authActionRequired = "Яндекс: требуется проверка — $carrier, $location"
                 publish(if (tunnelRunning && nativeTunnelReady) "CONNECTED" else "TRANSPORT", authActionRequired!!)
                 updateNotification(authActionRequired!!)
-            }, { authActionRequired = null; publish(if (tunnelRunning && nativeTunnelReady) "CONNECTED" else "TRANSPORT", "Проверка сохранена. Восстанавливаем защищённый канал") })
+            }, { authActionRequired = null; publish(if (tunnelRunning && nativeTunnelReady) "CONNECTED" else "TRANSPORT", "Результат передан. Проверяем доступ к Яндексу") })
             Thread {
                 try {
                     child.inputStream.bufferedReader().useLines { lines ->

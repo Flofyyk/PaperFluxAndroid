@@ -66,6 +66,8 @@ The profile password is a PaperFlux access key, not the VPS SSH password. Shared
 
 Yandex and Mail.ru Docs are supported. Volga requires a separate empty document with editing access because the transport modifies its content. Yandex access challenges open in a verification window when needed.
 
+The verification window identifies the document and connection side: phone or VPS. Submitting a result does not mean the tunnel is ready; document access and DNS/TCP are checked separately.
+
 The Connected state requires an authenticated session and successful DNS/TCP checks. Disconnected document channels recover in the background. When the device is offline, the app waits for network connectivity; manual disconnection cancels recovery.
 
 Backup sets contain separate configurations for already deployed servers. Switching requires automatic reconnection to be enabled. Changing VPS requires open TCP connections to be established again.

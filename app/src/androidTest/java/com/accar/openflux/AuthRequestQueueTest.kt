@@ -46,6 +46,14 @@ class AuthRequestQueueTest {
         } finally { dir.listFiles()?.forEach { it.delete() }; dir.delete() }
     }
     private fun request(id: String, remote: Boolean) = JSONObject().put("requestId", id).put("remote", remote)
+    @Test fun lateDuplicateCannotReopenCompletedCheck() {
+        val queue = AuthRequestQueue()
+        assertTrue(queue.accept(request("check", false)))
+        assertTrue(queue.acknowledge("check"))
+        assertFalse(queue.accept(request("check", false)))
+        assertNull(queue.current())
+        assertTrue(queue.accept(request("new-check", false)))
+    }
     @Test fun checksDoNotOverwriteEachOtherAndStaleAcksCannotClearThem() {
         val queue = AuthRequestQueue()
         assertTrue(queue.accept(request("local-1", false)))
