@@ -21,9 +21,15 @@ class ProfileShareTest {
             instrumentation.runOnMainSync {
                 assertTrue(activity.window.attributes.flags and WindowManager.LayoutParams.FLAG_SECURE != 0)
                 val views = descendants(activity.window.decorView)
-                assertTrue("QR is missing", views.filterIsInstance<ImageView>().any { it.drawable != null })
+                assertNotNull("QR is missing", activity.findViewById<ImageView>(R.id.share_qr).drawable)
                 val labels = views.filterIsInstance<TextView>().map { it.text.toString() }
-                listOf("Скопировать ссылку", "Поделиться ссылкой", "Поделиться QR-кодом", "Готово").forEach { assertTrue("Sharing action is missing", labels.contains(it)) }
+                // Check actions by stable IDs, not the labels from the previous UI.
+                for (id in listOf(R.id.share_copy, R.id.share_send, R.id.share_send_qr, R.id.share_close)) {
+                    val action = activity.findViewById<View>(id)
+                    assertTrue("Sharing action $id is hidden", action.isShown)
+                    assertTrue("Sharing action $id is inactive", action.isEnabled && action.isClickable)
+                }
+                assertFalse(activity.findViewById<View>(R.id.share_close).contentDescription.isNullOrBlank())
                 assertFalse("Password exposed as visible text", labels.any { it.contains(profile.getString("token")) })
             }
         } finally { instrumentation.runOnMainSync { activity.finish() }; instrumentation.waitForIdleSync() }

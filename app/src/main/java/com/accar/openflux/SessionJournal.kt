@@ -42,7 +42,7 @@ object SessionJournal {
             .put("id", "$now-${sequence.incrementAndGet()}")
             .put("at", now)
             .put("message", message.take(300))
-            .put("level", level)
+            .put("level", if (YandexCheckPresentation.isWaiting(message)) "warning" else level)
             .put("category", category)
             .put("stage", stage.take(48)))
         for (index in 0 until minOf(events.length(), MAX_EVENTS - 1)) next.put(events.getJSONObject(index))

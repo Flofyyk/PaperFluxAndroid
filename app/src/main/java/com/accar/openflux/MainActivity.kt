@@ -51,7 +51,9 @@ import java.io.ByteArrayOutputStream
 import java.security.SecureRandom
 
 class MainActivity : AppCompatActivity() {
-    private var openedAuthRequestId: String? = null
+    private var authAutoOpen = YandexAuthAutoOpenPolicy()
+    private var mainResumed = false
+    private var authLaunching = false
     @Volatile private var profileLoader: ProfileBootstrapClient? = null
     private val profileDiagnosticsExecutor = java.util.concurrent.Executors.newSingleThreadExecutor()
     private val profileRequestGeneration = java.util.concurrent.atomic.AtomicLong()
@@ -129,6 +131,9 @@ class MainActivity : AppCompatActivity() {
     private val stateReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
             sendWebState(intent.getStringExtra("state"), intent.getStringExtra("detail"), intent.getStringExtra("event"), intent.getLongExtra("rx", -1L), intent.getLongExtra("tx", -1L), intent.getLongExtra("ping", -1L), intent.getLongExtra("duration", -1L))
+            // Requests can arrive while this Activity is already resumed. Do
+            // this before the bundled-WebView early return as well.
+            if (intent.hasExtra("state")) maybeOpenYandexCheck()
             if (designWeb != null) return
             intent.getStringExtra("event")?.let { addLog(it) }
             intent.getStringExtra("state")?.let { state ->
@@ -139,6 +144,8 @@ class MainActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        authAutoOpen = YandexAuthAutoOpenPolicy(savedInstanceState?.getStringArrayList("opened-auth-requests").orEmpty(),
+            savedInstanceState?.getStringArrayList("opened-auth-scopes").orEmpty())
         WindowCompat.setDecorFitsSystemWindows(window, false)
         // App labels are cheap; icons are requested lazily by the WebView.
         Thread {
@@ -157,15 +164,47 @@ class MainActivity : AppCompatActivity() {
     }
     override fun onResume() {
         super.onResume()
+        mainResumed = true
+        authLaunching = false
+        maybeOpenYandexCheck()
+    }
+    override fun onPause() {
+        mainResumed = false
+        super.onPause()
+    }
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        // A request received under the notification shade is pending, not lost.
+        if (hasFocus) maybeOpenYandexCheck()
+    }
+    override fun onSaveInstanceState(outState: Bundle) {
+        outState.putStringArrayList("opened-auth-requests", authAutoOpen.openedIds())
+        outState.putStringArrayList("opened-auth-scopes", authAutoOpen.openedScopes())
+        super.onSaveInstanceState(outState)
+    }
+    private fun maybeOpenYandexCheck() {
+        if (!mainResumed || !hasWindowFocus() || authLaunching || isFinishing || isDestroyed) return
         val request = NativeAuthBridge.read(java.io.File(noBackupFilesDir, "auth-request.json")) ?: return
         val requestId = request.optString("requestId")
-        if (requestId.isBlank() || requestId == openedAuthRequestId) return
+        val scope = NativeAuthBridge.autoOpenScope(request)
         val vpnAlive = getSystemService(android.app.ActivityManager::class.java)
             .runningAppProcesses?.any { it.processName == "$packageName:vpn" } == true
-        if (!vpnAlive) return
-        if (TunnelSnapshot.read(this).optString("state") == "CONNECTED") return
-        openedAuthRequestId = requestId
-        startActivity(Intent(this, YandexAuthActivity::class.java))
+        if (!authAutoOpen.shouldOpen(requestId, request.optLong("created"), System.currentTimeMillis(),
+                foreground = true, vpnAlive = vpnAlive, dismissedUntil = NativeAuthBridge.autoOpenDismissedUntil(this, request),
+                scope = scope, scopePreviouslyOpened = NativeAuthBridge.wasAutoOpened(this, request),
+                vpnConnected = TunnelSnapshot.read(this).optString("state") == "CONNECTED")) return
+        if (!YandexVerificationPolicy.allows(request.optString("url"))) return
+        // A working tunnel does not need an auxiliary channel's modal check.
+        // Its pending request remains available explicitly in the notification.
+        authLaunching = true
+        runCatching {
+            startActivity(Intent(this, YandexAuthActivity::class.java).putExtra("request-id", requestId).putExtra("automatic", true))
+        }.onSuccess {
+            authAutoOpen.markOpened(requestId, scope)
+            runCatching { NativeAuthBridge.rememberAutoOpen(this, request) }
+                .onFailure { android.util.Log.w("PaperFluxAuth", "Cannot persist verification launch history") }
+        }
+            .onFailure { authLaunching = false; android.util.Log.w("PaperFluxAuth", "Cannot open verification window") }
     }
     override fun onStop() { runCatching { unregisterReceiver(stateReceiver) }; super.onStop() }
     override fun onDestroy() {
@@ -279,6 +318,11 @@ class MainActivity : AppCompatActivity() {
             state?.let { put("state", it) }; detail?.let { put("detail", it) }; event?.let { put("log", it) }
             if (rx >= 0) put("rxBytes", rx); if (tx >= 0) put("txBytes", tx); if (ping >= 0) put("ping", ping)
             if (duration >= 0) put("durationSec", duration)
+            if (state != null) {
+                val alive = getSystemService(android.app.ActivityManager::class.java)
+                    .runningAppProcesses?.any { it.processName == "$packageName:vpn" } == true
+                put("verification", NativeAuthBridge.verificationState(this@MainActivity, alive, state == "CONNECTED") ?: org.json.JSONObject.NULL)
+            }
         }.toString()
         web.evaluateJavascript("window.__paperFluxOnState&&window.__paperFluxOnState(${org.json.JSONObject.quote(payload)})", null)
     }
@@ -319,6 +363,15 @@ class MainActivity : AppCompatActivity() {
             requireIdle(); ProfileStore(this@MainActivity).delete(id); "Профиль удалён"
         } catch (e: Exception) { e.message ?: "Ошибка профиля" }
         @JavascriptInterface fun connect() = runOnUiThread { requestConnect() }
+        @JavascriptInterface fun openVerification() = runOnUiThread {
+            val request = NativeAuthBridge.read(java.io.File(noBackupFilesDir, "auth-request.json"))
+            val alive = getSystemService(android.app.ActivityManager::class.java)
+                .runningAppProcesses?.any { it.processName == "$packageName:vpn" } == true
+            if (request != null && NativeAuthBridge.verificationState(this@MainActivity, alive) != null) {
+                startActivity(Intent(this@MainActivity, YandexAuthActivity::class.java)
+                    .putExtra("request-id", request.optString("requestId")))
+            }
+        }
         @JavascriptInterface fun disconnect() = runOnUiThread { startService(Intent(this@MainActivity, OpenFluxVpnService::class.java).setAction(OpenFluxVpnService.STOP)) }
         @JavascriptInterface fun setAutoReconnect(enabled: Boolean) {
             getSharedPreferences(OpenFluxVpnService.PREFS, MODE_PRIVATE).edit().putBoolean(OpenFluxVpnService.AUTO_RECONNECT, enabled).apply()

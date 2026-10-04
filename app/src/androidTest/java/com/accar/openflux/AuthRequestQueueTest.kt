@@ -8,6 +8,80 @@ import androidx.test.platform.app.InstrumentationRegistry
 import java.io.File
 
 class AuthRequestQueueTest {
+    @Test fun publicWarningIsIndependentOfTunnelStateAndContainsNoPrivateRequestFields() {
+        val base = InstrumentationRegistry.getInstrumentation().targetContext
+        val dir = File(base.cacheDir, "verification-state-${System.nanoTime()}").apply { mkdir() }
+        val context = object : ContextWrapper(base) { override fun getNoBackupFilesDir(): File = dir }
+        val request = JSONObject().put("requestId", "test-id").put("attempt", "private-attempt")
+            .put("transport", "yandex-2").put("remote", true).put("created", System.currentTimeMillis())
+            .put("url", "https://disk.yandex.ru/i/test-only").put("proxy", "127.0.0.1:1234")
+        try {
+            NativeAuthBridge.write(File(dir, "auth-request.json"), request)
+            val visible = requireNotNull(NativeAuthBridge.verificationState(context, true))
+            assertEquals(setOf("carrier", "side", "automatic"), visible.keys().asSequence().toSet())
+            assertEquals("документ 2", visible.getString("carrier"))
+            assertEquals("VPS", visible.getString("side"))
+            assertTrue(visible.getBoolean("automatic"))
+            assertFalse(NativeAuthBridge.verificationState(context, true, vpnConnected = true)!!.getBoolean("automatic"))
+            assertNull(NativeAuthBridge.verificationState(context, false))
+            NativeAuthBridge.rememberAutoOpen(context, request)
+            assertFalse(NativeAuthBridge.verificationState(context, true)!!.getBoolean("automatic"))
+            request.put("created", System.currentTimeMillis() - 1_800_001)
+            NativeAuthBridge.write(File(dir, "auth-request.json"), request)
+            assertNull(NativeAuthBridge.verificationState(context, true))
+        } finally { dir.listFiles()?.forEach { it.delete() }; dir.delete() }
+    }
+    @Test fun journalPersistsVerificationAsWarningEvenWhenVpnIsConnected() {
+        val base = InstrumentationRegistry.getInstrumentation().targetContext
+        val dir = File(base.cacheDir, "verification-journal-${System.nanoTime()}").apply { mkdir() }
+        val context = object : ContextWrapper(base) { override fun getNoBackupFilesDir(): File = dir }
+        try {
+            SessionJournal.append(context, "Яндекс: требуется проверка — документ 2, телефон", "success", "connection", "CONNECTED")
+            assertEquals("warning", JSONObject(SessionJournal.read(context)).getJSONArray("events").getJSONObject(0).getString("level"))
+        } finally { dir.listFiles()?.forEach { it.delete() }; dir.delete() }
+    }
+    @Test fun newIdsStaySuppressedAcrossReadersButOtherChannelsAndAttemptsDoNot() {
+        val base = InstrumentationRegistry.getInstrumentation().targetContext
+        val dir = File(base.cacheDir, "auth-opened-${System.nanoTime()}").apply { mkdir() }
+        fun reader() = object : ContextWrapper(base) { override fun getNoBackupFilesDir(): File = dir }
+        fun pending(id: String, transport: String = "yandex-1", remote: Boolean = false, attempt: String = "attempt") =
+            JSONObject().put("requestId", id).put("transport", transport).put("remote", remote).put("attempt", attempt)
+        try {
+            NativeAuthBridge.rememberAutoOpen(reader(), pending("first-id"))
+            assertTrue(NativeAuthBridge.wasAutoOpened(reader(), pending("different-id")))
+            assertFalse(NativeAuthBridge.wasAutoOpened(reader(), pending("other", transport = "yandex-2")))
+            assertFalse(NativeAuthBridge.wasAutoOpened(reader(), pending("other", remote = true)))
+            assertFalse(NativeAuthBridge.wasAutoOpened(reader(), pending("other", attempt = "new-attempt")))
+            // Reading history does not acknowledge/delete a pending request.
+            val requestFile = File(dir, "auth-request.json")
+            NativeAuthBridge.write(requestFile, pending("different-id"))
+            assertTrue(NativeAuthBridge.wasAutoOpened(reader(), NativeAuthBridge.read(requestFile)!!))
+            assertEquals("different-id", NativeAuthBridge.read(requestFile)!!.getString("requestId"))
+            val file = File(dir, "auth-auto-opened.json")
+            assertTrue(file.renameTo(File(dir, "auth-auto-opened.json.bak")))
+            assertTrue(NativeAuthBridge.wasAutoOpened(reader(), pending("different-id")))
+            repeat(100) { NativeAuthBridge.rememberAutoOpen(reader(), pending("id-$it", attempt = "attempt-$it")) }
+            assertEquals(64, NativeAuthBridge.read(file)!!.length())
+            assertTrue(NativeAuthBridge.wasAutoOpened(reader(), pending("new-id", attempt = "attempt-99")))
+        } finally { dir.listFiles()?.forEach { it.delete() }; dir.delete() }
+    }
+    @Test fun cancellationCooldownIsFreshAcrossReadersAndScopedToChannelSideAndAttempt() {
+        val base = InstrumentationRegistry.getInstrumentation().targetContext
+        val dir = File(base.cacheDir, "auth-dismissal-${System.nanoTime()}").apply { mkdir() }
+        fun reader() = object : ContextWrapper(base) { override fun getNoBackupFilesDir(): File = dir }
+        fun pending(transport: String, remote: Boolean = false, attempt: String = "test-attempt") =
+            JSONObject().put("transport", transport).put("remote", remote).put("attempt", attempt)
+        try {
+            NativeAuthBridge.rememberAutoOpenDismissal(reader(), pending("yandex-1"))
+            NativeAuthBridge.rememberAutoOpenDismissal(reader(), pending("volga-1"))
+            val context = reader()
+            assertTrue(NativeAuthBridge.autoOpenDismissedUntil(context, pending("yandex-1")) > System.currentTimeMillis())
+            assertTrue(NativeAuthBridge.autoOpenDismissedUntil(context, pending("volga-1")) > System.currentTimeMillis())
+            assertEquals(0L, NativeAuthBridge.autoOpenDismissedUntil(context, pending("yandex-2")))
+            assertEquals(0L, NativeAuthBridge.autoOpenDismissedUntil(context, pending("yandex-1", remote = true)))
+            assertEquals(0L, NativeAuthBridge.autoOpenDismissedUntil(context, pending("yandex-1", attempt = "new-attempt")))
+        } finally { dir.listFiles()?.forEach { it.delete() }; dir.delete() }
+    }
     @Test fun preflightCookiesReachOnlyTheMatchingNativeDocumentStore() {
         val base = InstrumentationRegistry.getInstrumentation().targetContext
         val dir = File(base.cacheDir, "preflight-test-${System.nanoTime()}").apply { mkdir() }

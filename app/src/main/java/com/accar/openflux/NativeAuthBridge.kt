@@ -37,6 +37,57 @@ internal class AuthRequestQueue {
 
 /** Private, attempt-bound IPC; no cookies or document URLs enter Logcat. */
 object NativeAuthBridge {
+    internal fun autoOpenScope(request: JSONObject) = YandexAuthAutoOpenPolicy.scope(
+        request.optString("attempt"), request.optString("transport"), request.optBoolean("remote"))
+    private fun autoOpenHistory(context: Context): JSONObject = runCatching {
+        // AtomicFile must be allowed to recover .bak even if the base file is
+        // missing after interruption. Only MainActivity writes this history.
+        val bytes = AtomicFile(File(context.noBackupFilesDir, "auth-auto-opened.json")).readFully()
+        require(bytes.size <= 65536)
+        JSONObject(bytes.toString(Charsets.UTF_8))
+    }.getOrElse { JSONObject() }
+    fun wasAutoOpened(context: Context, request: JSONObject): Boolean =
+        autoOpenHistory(context).has(autoOpenScope(request))
+    fun rememberAutoOpen(context: Context, request: JSONObject) {
+        val previous = autoOpenHistory(context)
+        val scope = autoOpenScope(request)
+        val next = JSONObject()
+        // Bounded private history, no cookies, URLs or credentials. Fresh
+        // connection attempts have a new socket identity and remain eligible.
+        previous.keys().asSequence().filter { it != scope }
+            .sortedByDescending { previous.optLong(it) }.take(63)
+            .forEach { next.put(it, previous.optLong(it)) }
+        next.put(scope, System.currentTimeMillis())
+        write(File(context.noBackupFilesDir, "auth-auto-opened.json"), next)
+    }
+    fun rememberAutoOpenDismissal(context: Context, request: JSONObject) {
+        // Atomic file, not cached SharedPreferences: :auth and the UI are
+        // separate processes. Another channel or connection attempt is distinct.
+        val file = File(context.noBackupFilesDir, "auth-auto-open-dismissed.json")
+        val now = System.currentTimeMillis()
+        val previous = read(file) ?: JSONObject()
+        val next = JSONObject()
+        previous.keys().forEach { scope ->
+            if (previous.optLong(scope) > now && next.length() < 16) next.put(scope, previous.optLong(scope))
+        }
+        next.put(autoOpenScope(request), now + 600_000)
+        write(file, next)
+    }
+    fun autoOpenDismissedUntil(context: Context, request: JSONObject): Long {
+        val value = read(File(context.noBackupFilesDir, "auth-auto-open-dismissed.json")) ?: return 0
+        return value.optLong(autoOpenScope(request))
+    }
+    fun verificationState(context: Context, vpnAlive: Boolean, vpnConnected: Boolean = false): JSONObject? {
+        if (!vpnAlive) return null
+        val request = read(File(context.noBackupFilesDir, "auth-request.json")) ?: return null
+        val age = System.currentTimeMillis() - request.optLong("created")
+        if (request.optString("requestId").isBlank() || age !in 0..1_800_000 ||
+            !YandexVerificationPolicy.allows(request.optString("url"))) return null
+        // Public UI payload: never expose request URLs, cookies or socket paths.
+        return JSONObject().put("carrier", YandexVerificationPolicy.carrierLabel(request.optString("transport")))
+            .put("side", if (request.optBoolean("remote")) "VPS" else "телефон")
+            .put("automatic", !vpnConnected && !wasAutoOpened(context, request) && System.currentTimeMillis() >= autoOpenDismissedUntil(context, request))
+    }
     internal fun cookieKey(provider: String, document: String): String = MessageDigest.getInstance("SHA-256")
         .digest("$provider\u0000$document".toByteArray(Charsets.UTF_8)).joinToString("") { "%02x".format(it.toInt() and 255) }
     fun savePreflightCookies(context: Context, document: String, values: JSONObject) {

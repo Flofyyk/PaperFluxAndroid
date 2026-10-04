@@ -44,6 +44,7 @@ object TunnelSnapshot {
         if (!alive && data.optString("state") != "ERROR") {
             data.put("state", "DISCONNECTED").put("detail", "Туннель отключён")
         }
+        data.put("verification", NativeAuthBridge.verificationState(context, alive, data.optString("state") == "CONNECTED") ?: JSONObject.NULL)
         val started = data.optLong("sessionStartedElapsed", 0L)
         if (started > 0L) data.put("durationSec", ((SystemClock.elapsedRealtime() - started) / 1000L).coerceAtLeast(0L))
         data

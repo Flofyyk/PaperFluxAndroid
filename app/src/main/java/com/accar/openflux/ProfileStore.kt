@@ -7,6 +7,8 @@ import android.util.AtomicFile
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
+import java.io.FileNotFoundException
+import java.io.RandomAccessFile
 import java.security.KeyStore
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
@@ -16,6 +18,27 @@ import javax.crypto.spec.GCMParameterSpec
 /** One encrypted, atomically replaced profile store; only the Activity writes it. */
 class ProfileStore(private val context: Context) {
     private val file = AtomicFile(File(context.noBackupFilesDir, "profiles-v2.bin"))
+    private fun <T> withStoreLock(action: () -> T): T = synchronized(storeLock) {
+        val lockFile = File(context.noBackupFilesDir, "profiles-v2.lock")
+        val path = lockFile.absolutePath
+        val held = heldLocks.get()!!
+        if (path in held) return@synchronized action()
+        check(lockFile.parentFile!!.isDirectory || lockFile.parentFile!!.mkdirs())
+        RandomAccessFile(lockFile, "rw").use { handle ->
+            handle.channel.lock().use {
+                held.add(path)
+                try { action() } finally { held.remove(path) }
+            }
+        }
+    }
+    private fun storedBytes(): ByteArray? = try {
+        // openRead also restores a legacy .bak after an interrupted replacement.
+        // Checking baseFile.exists() first would incorrectly treat it as empty.
+        file.readFully()
+    } catch (error: FileNotFoundException) {
+        if (file.baseFile.exists() || File(file.baseFile.path + ".bak").exists()) throw error
+        null
+    }
     private fun key(): SecretKey {
         val store = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
         (store.getKey("paperflux-profiles-v2", null) as? SecretKey)?.let { return it }
@@ -25,9 +48,8 @@ class ProfileStore(private val context: Context) {
                 .setBlockModes(KeyProperties.BLOCK_MODE_GCM).setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE).build())
         }.generateKey()
     }
-    private fun read(): JSONObject {
-        if (!file.baseFile.exists()) return JSONObject().put("activeId", "").put("profiles", JSONArray())
-        val bytes = file.readFully()
+    private fun read(): JSONObject = withStoreLock {
+        val bytes = storedBytes() ?: return@withStoreLock JSONObject().put("activeId", "").put("profiles", JSONArray())
         require(bytes.size >= 28) { "Хранилище профилей повреждено" }
         val cipher = Cipher.getInstance("AES/GCM/NoPadding")
         cipher.init(Cipher.DECRYPT_MODE, key(), GCMParameterSpec(128, bytes.copyOfRange(0, 12)))
@@ -46,7 +68,7 @@ class ProfileStore(private val context: Context) {
             // There is no explicit "none selected" action, so retain a usable profile.
             data.put("activeId", rows.getJSONObject(0).getString("key"))
         }
-        return data
+        data
     }
     private fun write(data: JSONObject) {
         val cipher = Cipher.getInstance("AES/GCM/NoPadding")
@@ -86,12 +108,12 @@ class ProfileStore(private val context: Context) {
         return value
     }
     private fun profileKey(profile: JSONObject) = profile.optString("server").trim().lowercase(java.util.Locale.ROOT) + "|" + profile.getString("id")
-    fun migrate() {
-        if (file.baseFile.exists()) return
+    fun migrate() = withStoreLock {
+        if (storedBytes() != null) return@withStoreLock
         val prefs = context.getSharedPreferences(OpenFluxVpnService.PREFS, Context.MODE_PRIVATE)
         val id = prefs.getString("profile_id", "").orEmpty()
         val token = prefs.getString("profile_token", "").orEmpty()
-        if (id.isBlank() || token.isBlank()) return
+        if (id.isBlank() || token.isBlank()) return@withStoreLock
         save(JSONObject().put("id", id).put("token", token)
             .put("name", prefs.getString("profile_name", "PaperFlux"))
             .put("server", prefs.getString("server_ip", ""))
@@ -112,7 +134,7 @@ class ProfileStore(private val context: Context) {
         }
         return data.toString()
     }
-    fun save(profile: JSONObject, replacing: String? = null) = synchronized(storeLock) {
+    fun save(profile: JSONObject, replacing: String? = null) = withStoreLock {
         val canonical = canonical(profile)
         val data = read()
         val rows = data.getJSONArray("profiles")
@@ -123,13 +145,13 @@ class ProfileStore(private val context: Context) {
         write(data)
         mirror(canonical)
     }
-    fun select(id: String) = synchronized(storeLock) {
+    fun select(id: String) = withStoreLock {
         val data = read()
         val profile = find(id)
         write(data.put("activeId", profile.getString("key")))
         mirror(profile)
     }
-    fun update(id: String, name: String, server: String, documentUrl: String, clientIp: String, provider: String, replacementToken: String?) = synchronized(storeLock) {
+    fun update(id: String, name: String, server: String, documentUrl: String, clientIp: String, provider: String, replacementToken: String?) = withStoreLock {
         val data = read()
         val rows = data.getJSONArray("profiles")
         val next = JSONArray()
@@ -160,7 +182,7 @@ class ProfileStore(private val context: Context) {
         write(data)
         if (wasActive) mirror(updated)
     }
-    fun delete(id: String) = synchronized(storeLock) {
+    fun delete(id: String) = withStoreLock {
         val data = read()
         val rows = data.getJSONArray("profiles")
         val key = find(id).getString("key")
@@ -181,5 +203,10 @@ class ProfileStore(private val context: Context) {
             .putString("server_ip", profile?.optString("server").orEmpty())
             .remove("profile_token").commit()) { "Не удалось сохранить выбор профиля" }
     }
-    companion object { private val storeLock = Any() }
+    companion object {
+        private val storeLock = Any()
+        private val heldLocks = object : ThreadLocal<MutableSet<String>>() {
+            override fun initialValue(): MutableSet<String> = mutableSetOf()
+        }
+    }
 }

@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ConnectionStatus, LogCategory, LogEntry, LogLevel, SessionStats, Stage, StageStatus } from "../types";
 import { nowTime, uid } from "../utils/format";
+import { detailLevel, isVerificationWarning, readVerification } from "../utils/verification";
+import type { VerificationState } from "../utils/verification";
 
 const STAGES: Omit<Stage, "status">[] = [
   { id: "vpn", title: "VPN-интерфейс", description: "Создание системного туннеля устройства" },
@@ -15,7 +17,7 @@ export function useVpn(_opts: { autoReconnect: boolean; timeoutSec: number }) {
   const [stages, setStages] = useState<Stage[]>(freshStages());
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [errorReason, setErrorReason] = useState<string | null>(null);
-  const [authRequired, setAuthRequired] = useState(false);
+  const [verification, setVerification] = useState<VerificationState | null>(null);
   const [stats, setStats] = useState<SessionStats>({ durationSec: 0, ping: null, rxBytes: 0, txBytes: 0, rxRate: 0, txRate: 0 });
   const durationTimer = useRef<number | null>(null);
 	const trafficSnapshot = useRef<{ rxBytes: number; txBytes: number; at: number } | null>(null);
@@ -55,11 +57,12 @@ export function useVpn(_opts: { autoReconnect: boolean; timeoutSec: number }) {
     if (!native) return;
     const handleState = (raw: string) => {
       try {
-        const event = JSON.parse(raw) as { state?: string; detail?: string; log?: string; rxBytes?: number; txBytes?: number; ping?: number; durationSec?: number };
+        const event = JSON.parse(raw) as { state?: string; detail?: string; log?: string; rxBytes?: number; txBytes?: number; ping?: number; durationSec?: number; verification?: unknown };
         // Log/stat broadcasts deliberately omit `state`. They must never
         // reset a successfully connected screen back to "connecting".
         const state = event.state;
-        if (event.detail || state === "DISCONNECTED" || state === "CONNECTED") setAuthRequired(/Яндекс требует проверку/.test(event.detail ?? ""));
+        if (Object.prototype.hasOwnProperty.call(event, "verification")) setVerification(readVerification(event.verification));
+        else if (state === "DISCONNECTED" || state === "CONNECTING") setVerification(null);
         const mapped: ConnectionStatus | null = state === undefined ? null : state === "CONNECTED" ? "connected" : state === "ERROR" ? "error" : state === "DISCONNECTED" ? "idle" : state === "TRANSPORT" || state === "RECONNECTING" || state === "WAITING_NETWORK" ? "reconnecting" : "connecting";
         if (mapped) setStatus((previous) => previous === mapped ? previous : mapped);
         if (state === "CONNECTING") {
@@ -110,7 +113,7 @@ export function useVpn(_opts: { autoReconnect: boolean; timeoutSec: number }) {
         if (state === "DNS") setStage("dns", "running");
         if (state === "ERROR") setStages((previous) => previous.map((stage) => stage.status === "running" ? { ...stage, status: "error" } : stage));
         if (mapped) setErrorReason(mapped === "error" ? (event.detail ?? "Соединение прервано") : null);
-        if (event.detail) pushLog(event.detail, mapped === "error" ? "error" : mapped === "connected" ? "success" : state === "WAITING_NETWORK" || mapped === "reconnecting" ? "warning" : "info", state === "WAITING_NETWORK" ? "network" : "connection", state ?? "Система");
+        if (event.detail) pushLog(event.detail, detailLevel(state, event.detail), state === "WAITING_NETWORK" ? "network" : "connection", state ?? "Система");
         if (event.log) pushLog(event.log, /error|failed|обрыв|refused|1005/i.test(event.log) ? "error" : "info", "system", state ?? "Система");
       } catch { /* ignore malformed native events */ }
     };
@@ -122,7 +125,7 @@ export function useVpn(_opts: { autoReconnect: boolean; timeoutSec: number }) {
           id: item.id ?? `restored-${item.at ?? 0}-${index}`,
           time: new Date(item.at ?? Date.now()).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit", second: "2-digit" }),
           message: item.message ?? "Событие PaperFlux",
-          level: item.level ?? "info",
+          level: isVerificationWarning(item.message ?? "") ? "warning" : item.level ?? "info",
           category: item.category ?? "system",
           stage: item.stage ?? "Система",
         } as LogEntry));
@@ -138,7 +141,7 @@ export function useVpn(_opts: { autoReconnect: boolean; timeoutSec: number }) {
 
   const connect = useCallback(() => {
     const native = (window as unknown as { PaperFluxNative?: { connect?: () => void } }).PaperFluxNative;
-    stopStats(); setStatus("connecting"); setErrorReason(null); setStages(freshStages());
+    stopStats(); setStatus("connecting"); setErrorReason(null); setVerification(null); setStages(freshStages());
 	trafficSnapshot.current = null;
     setStats({ durationSec: 0, ping: null, rxBytes: 0, txBytes: 0, rxRate: 0, txRate: 0 });
     setLogs([]);
@@ -159,5 +162,8 @@ export function useVpn(_opts: { autoReconnect: boolean; timeoutSec: number }) {
     setLogs([]);
     (window as unknown as { PaperFluxNative?: { clearSessionLogs?: () => void } }).PaperFluxNative?.clearSessionLogs?.();
   }, []);
-  return { status, stages, logs, errorReason, authRequired, stats, connect, disconnect, retry, clearLogs, pushLog };
+  const openVerification = useCallback(() => {
+    (window as unknown as { PaperFluxNative?: { openVerification?: () => void } }).PaperFluxNative?.openVerification?.();
+  }, []);
+  return { status, stages, logs, errorReason, authRequired: verification !== null, verification, openVerification, stats, connect, disconnect, retry, clearLogs, pushLog };
 }

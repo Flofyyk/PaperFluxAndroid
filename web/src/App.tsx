@@ -163,6 +163,8 @@ export default function App() {
                 stages={vpn.stages}
                 stats={vpn.stats}
                 errorReason={vpn.errorReason}
+                verification={vpn.verification}
+                onOpenVerification={vpn.openVerification}
                 profile={selectedProfile && { ...selectedProfile, countryCode: inspections[activeProfile]?.countryCode }}
                 onOpenProfiles={() => setActiveTab("profiles")}
                 onToggleConnection={handleToggleConnection}

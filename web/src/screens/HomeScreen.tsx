@@ -7,12 +7,16 @@ import { StageList } from "../components/home/StageList";
 import { DisconnectCard } from "../components/home/DisconnectCard";
 import { StatsGrid } from "../components/home/StatsGrid";
 import { ActiveProfileCard } from "../components/home/ActiveProfileCard";
+import { VerificationCard } from "../components/home/VerificationCard";
+import type { VerificationState } from "../utils/verification";
 
 export function HomeScreen({
   status,
   stages,
   stats,
   errorReason,
+  verification,
+  onOpenVerification,
   profile,
   onOpenProfiles,
   onToggleConnection,
@@ -22,6 +26,8 @@ export function HomeScreen({
   stages: Stage[];
   stats: SessionStats;
   errorReason: string | null;
+  verification: VerificationState | null;
+  onOpenVerification: () => void;
   profile?: PaperFluxProfile;
   onOpenProfiles: () => void;
   onToggleConnection: () => void;
@@ -39,6 +45,7 @@ export function HomeScreen({
           <ConnectButton status={status} onPress={onToggleConnection} />
           <StatusHint status={status} />
           <StatsGrid stats={stats} active={active} />
+          {verification && !active && <div className="w-full"><VerificationCard verification={verification} onOpen={onOpenVerification} /></div>}
         </div>
 
         <div className="flex flex-col gap-3.5 px-5 pb-8 @[420px]:grid @[420px]:grid-cols-2 @[420px]:gap-4 @[420px]:px-6">

@@ -18,6 +18,7 @@ import android.widget.TextView
 import android.view.Gravity
 import android.view.View
 import androidx.appcompat.app.AppCompatActivity
+import androidx.activity.OnBackPressedCallback
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
@@ -38,16 +39,38 @@ class YandexAuthActivity : AppCompatActivity() {
     private var startUrl = ""
     private var currentUrl = ""
     private var pageFailed = false
+    private var pageComplete = false
     private var submitted = false
     private var checkingPage = false
+    private val checkHandler = android.os.Handler(android.os.Looper.getMainLooper())
+    private val automaticResultCheck = object : Runnable {
+        override fun run() {
+            if (isFinishing || isDestroyed) return
+            if (intent.getBooleanExtra("automatic", false) && TunnelSnapshot.read(this@YandexAuthActivity).optString("state") == "CONNECTED") {
+                // An alternative channel recovered. Do not keep a modal check
+                // in front of a working VPN, and do not cancel its native request.
+                finish(); return
+            }
+            // CAPTCHA can finish via AJAX without navigating. Inspect only
+            // readiness; never click, solve or send an incomplete challenge.
+            if (pending != null && !submitted && !pageFailed && pageComplete && currentUrl.isNotEmpty() && !isCheckpoint(currentUrl)) saveCookies()
+            checkHandler.postDelayed(this, 1500)
+        }
+    }
     private val directExecutor = Executor { it.run() }
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        if (intent.getBooleanExtra("automatic", false) && TunnelSnapshot.read(this).optString("state") == "CONNECTED") { finish(); return }
+        onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
+            override fun handleOnBackPressed() { cancelCheck() }
+        })
         if (android.os.Build.VERSION.SDK_INT >= 28) runCatching { WebView.setDataDirectorySuffix("verification") }
         pending = NativeAuthBridge.read(File(noBackupFilesDir, "auth-request.json"))?.takeIf {
-            System.currentTimeMillis() - it.optLong("created") in 0..1_800_000
+            System.currentTimeMillis() - it.optLong("created") in 0..1_800_000 &&
+                (intent.getStringExtra("request-id")?.let { id -> id == it.optString("requestId") } ?: true)
         }
+        if (intent.hasExtra("request-id") && pending == null) { finish(); return }
         val raw = pending?.optString("url")?.takeIf { it.isNotBlank() } ?: intent.getStringExtra("document").orEmpty()
         startUrl = raw
         val remote = pending?.optBoolean("remote") == true
@@ -99,7 +122,7 @@ class YandexAuthActivity : AppCompatActivity() {
             }
             webViewClient = object : WebViewClient() {
                 override fun onPageStarted(view: WebView, url: String, favicon: android.graphics.Bitmap?) {
-                    currentUrl = url; pageFailed = false
+                    currentUrl = url; pageFailed = false; pageComplete = false
                     errorView?.visibility = View.GONE
                     setStatus("Открываем страницу Яндекса…")
                 }
@@ -112,6 +135,7 @@ class YandexAuthActivity : AppCompatActivity() {
                 override fun onPageFinished(view: WebView, url: String) {
                     currentUrl = url
                     if (pageFailed) return
+                    pageComplete = true
                     setStatus(if (isCheckpoint(url)) "Пройдите проверку на странице Яндекса" else if (pending != null) "Страница открыта. Проверяем результат…" else "Страница открыта. Нажмите «Я прошёл проверку»")
                     if (pending != null && !pageFailed && !isCheckpoint(url)) view.postDelayed({
                         if (!isFinishing && !pageFailed && currentUrl == url && !isCheckpoint(currentUrl)) saveCookies()
@@ -142,6 +166,7 @@ class YandexAuthActivity : AppCompatActivity() {
             if (remote) ProxyController.getInstance().setProxyOverride(ProxyConfig.Builder().addProxyRule("http://$proxy").build(), directExecutor) { runOnUiThread { loadVerified() } }
             else ProxyController.getInstance().clearProxyOverride(directExecutor) { runOnUiThread { loadVerified() } }
         } else loadVerified()
+        checkHandler.postDelayed(automaticResultCheck, 1500)
     }
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density + 0.5f).toInt()
     private fun setStatus(message: String, color: Int = Color.rgb(189, 183, 204)) {
@@ -150,6 +175,7 @@ class YandexAuthActivity : AppCompatActivity() {
     }
     private fun showLoadError(message: String, retry: Boolean = true) {
         pageFailed = true
+        pageComplete = false
         progressView?.visibility = View.GONE
         errorView?.visibility = View.VISIBLE
         findViewById<TextView>(R.id.auth_error_text).text = message
@@ -162,6 +188,7 @@ class YandexAuthActivity : AppCompatActivity() {
     private fun requestRoute(remote: Boolean) = "${pending?.optString("attempt").orEmpty()}/$remote"
     private fun saveCookies() {
         if (submitted || checkingPage) return
+        if (!pageComplete) { setStatus("Дождитесь загрузки страницы Яндекса"); return }
         if (!YandexVerificationPolicy.allows(currentUrl) || isCheckpoint(currentUrl) || pageFailed) {
             setStatus("Сначала завершите проверку на странице Яндекса", Color.rgb(255, 177, 177))
             return
@@ -228,17 +255,18 @@ class YandexAuthActivity : AppCompatActivity() {
     }
     private fun cancelCheck() {
         pending?.let { request ->
+            runCatching { NativeAuthBridge.rememberAutoOpenDismissal(this, request) }
             NativeAuthBridge.write(File(noBackupFilesDir, "auth-command.json"), JSONObject()
                 .put("attempt", request.optString("attempt")).put("action", "cancel-auth")
                 .put("params", JSONObject().put("requestId", request.optString("requestId"))))
         }
         finish()
     }
-    @Deprecated("Legacy back callback")
-    override fun onBackPressed() { cancelCheck() }
     override fun onDestroy() {
+        checkHandler.removeCallbacksAndMessages(null)
+        val hadBrowser = browser != null
         browser?.stopLoading(); browser?.destroy(); browser = null
-        if (WebViewFeature.isFeatureSupported(WebViewFeature.PROXY_OVERRIDE)) ProxyController.getInstance().clearProxyOverride(directExecutor) {}
+        if (hadBrowser && WebViewFeature.isFeatureSupported(WebViewFeature.PROXY_OVERRIDE)) ProxyController.getInstance().clearProxyOverride(directExecutor) {}
         super.onDestroy()
     }
 }
