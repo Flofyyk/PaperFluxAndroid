@@ -303,10 +303,22 @@ class OpenFluxVpnService : VpnService() {
             NativeAuthBridge.start(this, authSocket, child, { current() && process === child }, { request ->
                 val location = if (request.optBoolean("remote")) "VPS" else "телефон"
                 val carrier = YandexVerificationPolicy.carrierLabel(request.optString("transport"))
-                authActionRequired = "Яндекс: требуется проверка — $carrier, $location"
-                publish(if (tunnelRunning && nativeTunnelReady) "CONNECTED" else "TRANSPORT", authActionRequired!!)
+                val healthy = tunnelRunning && nativeTunnelReady
+                authActionRequired = YandexCheckPresentation.required(carrier, location, healthy)
+                // Keep the tunnel's state healthy. An auxiliary document's
+                // check belongs in a separate scoped journal/notification.
+                if (healthy) publishEvent(authActionRequired!!)
+                else publish("TRANSPORT", authActionRequired!!)
                 updateNotification(authActionRequired!!)
-            }, { authActionRequired = null; publish(if (tunnelRunning && nativeTunnelReady) "CONNECTED" else "TRANSPORT", "Результат передан. Проверяем доступ к Яндексу") })
+            }, {
+                authActionRequired = null
+                val healthy = tunnelRunning && nativeTunnelReady
+                publish(if (healthy) "CONNECTED" else "TRANSPORT", if (healthy) YandexCheckPresentation.HEALTHY else "Результат передан. Проверяем доступ к Яндексу")
+            }, { request ->
+                publishEvent(YandexCheckPresentation.accepted(
+                    YandexVerificationPolicy.carrierLabel(request.optString("transport")),
+                    if (request.optBoolean("remote")) "VPS" else "телефон"))
+            })
             Thread {
                 try {
                     child.inputStream.bufferedReader().useLines { lines ->
@@ -413,7 +425,7 @@ class OpenFluxVpnService : VpnService() {
             tunnelRunning = true
             serverFailover.healthy(selectedKey)
             reconnectAttempt = 0
-            publish("CONNECTED", authActionRequired ?: "Защищённый туннель подтверждён. DNS и TCP готовы")
+            publish("CONNECTED", YandexCheckPresentation.HEALTHY)
             startTrafficStats()
             startNetworkWatchdog()
             Thread {
@@ -979,6 +991,7 @@ class OpenFluxVpnService : VpnService() {
         fun isTunnelRunning(): Boolean = tunnelRunning
 
         private fun journalLevel(message: String): String = when {
+            YandexCheckPresentation.isWaiting(message) -> "warning"
             Regex("(?i)error|failed|обрыв|refused|1005|broken pipe|reset").containsMatchIn(message) -> "error"
             Regex("(?i)reconnect|ожидаем|waiting|bootstrap").containsMatchIn(message) -> "warning"
             Regex("(?i)connected|ready|готов|успеш").containsMatchIn(message) -> "success"

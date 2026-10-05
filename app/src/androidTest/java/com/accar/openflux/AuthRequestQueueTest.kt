@@ -40,6 +40,24 @@ class AuthRequestQueueTest {
             assertEquals("warning", JSONObject(SessionJournal.read(context)).getJSONArray("events").getJSONObject(0).getString("level"))
         } finally { dir.listFiles()?.forEach { it.delete() }; dir.delete() }
     }
+    @Test fun acceptedDocumentAndRemainingAuxiliaryCheckCannotReplaceHealthyTunnelStatus() {
+        val base = InstrumentationRegistry.getInstrumentation().targetContext
+        val dir = File(base.cacheDir, "verification-lifecycle-${System.nanoTime()}").apply { mkdir() }
+        val context = object : ContextWrapper(base) { override fun getNoBackupFilesDir(): File = dir }
+        try {
+            SessionJournal.append(context, YandexCheckPresentation.accepted("документ 1", "телефон"), "info", "system", "Система")
+            SessionJournal.append(context, YandexCheckPresentation.required("документ 2", "телефон", true), "info", "system", "Система")
+            SessionJournal.append(context, YandexCheckPresentation.HEALTHY, "success", "connection", "CONNECTED")
+            val events = JSONObject(SessionJournal.read(context)).getJSONArray("events")
+            assertEquals("success", events.getJSONObject(0).getString("level"))
+            assertFalse(events.getJSONObject(0).getString("message").contains("проверка"))
+            assertEquals("warning", events.getJSONObject(1).getString("level"))
+            assertTrue(events.getJSONObject(1).getString("message").contains("документ 2"))
+            assertTrue(events.getJSONObject(1).getString("message").contains("VPN работает"))
+            assertEquals("info", events.getJSONObject(2).getString("level"))
+            assertTrue(events.getJSONObject(2).getString("message").contains("документ 1"))
+        } finally { dir.listFiles()?.forEach { it.delete() }; dir.delete() }
+    }
     @Test fun newIdsStaySuppressedAcrossReadersButOtherChannelsAndAttemptsDoNot() {
         val base = InstrumentationRegistry.getInstrumentation().targetContext
         val dir = File(base.cacheDir, "auth-opened-${System.nanoTime()}").apply { mkdir() }
@@ -142,6 +160,30 @@ class AuthRequestQueueTest {
         assertTrue(queue.acknowledge("server-1"))
         assertEquals("local-2", queue.current()?.getString("requestId"))
         assertTrue(queue.acknowledge("local-2"))
+        assertNull(queue.current())
+    }
+    @Test fun everyAcceptedDocumentIsReportedBeforeAdvancingAndOnlyOnce() {
+        val queue = AuthRequestQueue()
+        queue.accept(request("document-1", false))
+        queue.accept(request("volga", false))
+        queue.accept(request("document-2", true))
+        val accepted = mutableListOf<String>()
+        val active = mutableListOf<String?>()
+        fun ack(id: String) = queue.acknowledgeResult(id,
+            { accepted.add(it.getString("requestId")) },
+            { active.add(queue.current()?.getString("requestId")) })
+        ack("document-1")
+        assertEquals(listOf("document-1"), accepted)
+        assertEquals(listOf("volga"), active)
+        ack("document-1"); ack("stale")
+        assertEquals(1, accepted.size)
+        assertEquals(1, active.size)
+        ack("document-2") // A non-visible document may also finish first.
+        assertEquals(listOf("document-1", "document-2"), accepted)
+        assertEquals(1, active.size)
+        ack("volga")
+        assertEquals(listOf("document-1", "document-2", "volga"), accepted)
+        assertEquals(listOf("volga", null), active)
         assertNull(queue.current())
     }
 }

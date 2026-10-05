@@ -46,14 +46,16 @@ class YandexAuthActivity : AppCompatActivity() {
     private val automaticResultCheck = object : Runnable {
         override fun run() {
             if (isFinishing || isDestroyed) return
-            if (intent.getBooleanExtra("automatic", false) && TunnelSnapshot.read(this@YandexAuthActivity).optString("state") == "CONNECTED") {
+            val automaticHealthy = intent.getBooleanExtra("automatic", false) && TunnelSnapshot.read(this@YandexAuthActivity).optString("state") == "CONNECTED"
+            if (automaticHealthy && !YandexCheckPresentation.shouldDeferAutomaticDismissal(
+                    checkingPage, submitted, pending != null, pageComplete, pageFailed, isCheckpoint(currentUrl))) {
                 // An alternative channel recovered. Do not keep a modal check
                 // in front of a working VPN, and do not cancel its native request.
                 finish(); return
             }
             // CAPTCHA can finish via AJAX without navigating. Inspect only
             // readiness; never click, solve or send an incomplete challenge.
-            if (pending != null && !submitted && !pageFailed && pageComplete && currentUrl.isNotEmpty() && !isCheckpoint(currentUrl)) saveCookies()
+            if (pending != null && !submitted && !pageFailed && pageComplete && currentUrl.isNotEmpty() && !isCheckpoint(currentUrl)) saveCookies(finishIfTunnelReady = automaticHealthy)
             checkHandler.postDelayed(this, 1500)
         }
     }
@@ -157,10 +159,13 @@ class YandexAuthActivity : AppCompatActivity() {
         val loadVerified = {
             val route = requestRoute(remote)
             val prefs = getSharedPreferences("verification-browser", MODE_PRIVATE)
-            if (prefs.getString("route", "") != route) CookieManager.getInstance().removeAllCookies {
+            if (YandexVerificationPolicy.shouldResetBrowserCookies(prefs.getString("route", "").orEmpty(), route)) CookieManager.getInstance().removeAllCookies {
                 prefs.edit().putString("route", route).apply()
                 runOnUiThread { if (!isFinishing) web.loadUrl(raw) }
-            } else if (!isFinishing) web.loadUrl(raw)
+            } else if (!isFinishing) {
+                prefs.edit().putString("route", route).apply()
+                web.loadUrl(raw)
+            }
         }
         if (WebViewFeature.isFeatureSupported(WebViewFeature.PROXY_OVERRIDE)) {
             if (remote) ProxyController.getInstance().setProxyOverride(ProxyConfig.Builder().addProxyRule("http://$proxy").build(), directExecutor) { runOnUiThread { loadVerified() } }
@@ -185,8 +190,8 @@ class YandexAuthActivity : AppCompatActivity() {
     private fun isAllowedYandexUrl(uri: Uri): Boolean {
         return YandexVerificationPolicy.allows(uri.toString())
     }
-    private fun requestRoute(remote: Boolean) = "${pending?.optString("attempt").orEmpty()}/$remote"
-    private fun saveCookies() {
+    private fun requestRoute(remote: Boolean) = YandexVerificationPolicy.browserCookieRoute(pending?.optString("attempt").orEmpty(), remote)
+    private fun saveCookies(finishIfTunnelReady: Boolean = false) {
         if (submitted || checkingPage) return
         if (!pageComplete) { setStatus("Дождитесь загрузки страницы Яндекса"); return }
         if (!YandexVerificationPolicy.allows(currentUrl) || isCheckpoint(currentUrl) || pageFailed) {
@@ -215,6 +220,9 @@ class YandexAuthActivity : AppCompatActivity() {
             if (isFinishing || isDestroyed || submitted || pageFailed || currentUrl != checkedUrl) return@evaluateJavascript
             if (result != "true") {
                 setStatus("Завершите проверку и дождитесь открытия документа")
+                // The page was still a challenge. Keep its native request,
+                // but do not block a healthy VPN with an auxiliary modal.
+                if (finishIfTunnelReady && TunnelSnapshot.read(this).optString("state") == "CONNECTED") finish()
                 return@evaluateJavascript
             }
             persistCookies()

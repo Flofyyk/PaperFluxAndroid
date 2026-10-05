@@ -7,6 +7,12 @@ import java.util.Locale
 internal object YandexVerificationPolicy {
     private val roots = listOf("yandex.ru", "yandex.com", "yandex.by", "yandex.kz", "yandex.uz", "yandex.com.tr")
 
+    // A new native process/socket does not change the phone's browser route.
+    // Still clear cookies when switching to/from a VPS proxy: its IP differs.
+    fun browserCookieRoute(attempt: String, remote: Boolean) = if (remote) "$attempt/true" else "phone"
+    fun shouldResetBrowserCookies(previous: String, next: String): Boolean =
+        previous != next && !(next == "phone" && previous.endsWith("/false"))
+
     fun isCheckpoint(raw: String): Boolean = runCatching {
         if (!allows(raw)) return true
         val uri = URI(raw)

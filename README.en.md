@@ -68,6 +68,8 @@ Yandex and Mail.ru Docs are supported. Volga requires a separate empty document 
 
 The verification window identifies the document and connection side: phone or VPS. Submitting a result does not mean the tunnel is ready; document access and DNS/TCP are checked separately.
 
+Verification cookies are retained between phone connections and are not replaced by background VPS responses. The event log records result delivery for each document separately; earlier warnings remain historical events, not the current VPN status.
+
 When verification is needed to connect, its window opens automatically while the app is visible. Repeated requests from the same channel do not create a series of windows. Once the VPN is working, auxiliary-channel checks do not interrupt the screen and remain accessible from the notification. A CAPTCHA, if shown by Yandex, must be completed manually; the app submits the result automatically afterwards.
 
 The Connected state requires an authenticated session and successful DNS/TCP checks. Disconnected document channels recover in the background. When the device is offline, the app waits for network connectivity; manual disconnection cancels recovery.

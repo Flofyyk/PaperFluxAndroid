@@ -33,6 +33,14 @@ internal class AuthRequestQueue {
         }
         return active
     }
+    fun acknowledgeResult(id: String, onAccepted: (JSONObject) -> Unit, onCurrentChanged: () -> Unit) {
+        val request = requests[id]
+        val changed = acknowledge(id)
+        // Report every accepted result, even when another document is next.
+        // Duplicate/stale ACKs must not manufacture a completion event.
+        if (request != null) onAccepted(request)
+        if (changed) onCurrentChanged()
+    }
 }
 
 /** Private, attempt-bound IPC; no cookies or document URLs enter Logcat. */
@@ -141,7 +149,7 @@ object NativeAuthBridge {
         val atomic = AtomicFile(file); val out = atomic.startWrite()
         try { out.write(bytes); atomic.finishWrite(out) } catch (e: Exception) { atomic.failWrite(out); throw e }
     }
-    fun start(context: Context, socketPath: String, child: Process, current: () -> Boolean, onRequest: (JSONObject) -> Unit, onUpdated: () -> Unit) {
+    fun start(context: Context, socketPath: String, child: Process, current: () -> Boolean, onRequest: (JSONObject) -> Unit, onUpdated: () -> Unit, onAccepted: (JSONObject) -> Unit = {}) {
         val requestFile = File(context.noBackupFilesDir, "auth-request.json")
         val offerFile = File(context.noBackupFilesDir, "auth-offer.json")
         val commandFile = File(context.noBackupFilesDir, "auth-command.json")
@@ -204,7 +212,7 @@ object NativeAuthBridge {
                             val line = JSONObject(payload.toString(Charsets.UTF_8)).optString("line")
                             if (line.startsWith("AUTH_UPDATED:")) synchronized(lock) {
                                 val id = line.removePrefix("AUTH_UPDATED:")
-                                if (queue.acknowledge(id)) displayNext()
+                                queue.acknowledgeResult(id, onAccepted, ::displayNext)
                             }
                         }
                     }

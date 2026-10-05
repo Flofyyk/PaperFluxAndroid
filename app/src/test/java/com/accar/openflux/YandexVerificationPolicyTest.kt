@@ -4,6 +4,17 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class YandexVerificationPolicyTest {
+    @Test fun newPhoneAttemptKeepsItsBrowserCheckButVpsRouteRemainsIsolated() {
+        val phone = YandexVerificationPolicy.browserCookieRoute("new-socket", false)
+        assertEquals("phone", phone)
+        assertFalse(YandexVerificationPolicy.shouldResetBrowserCookies("old-socket/false", phone))
+        assertFalse(YandexVerificationPolicy.shouldResetBrowserCookies("phone", phone))
+        assertTrue(YandexVerificationPolicy.shouldResetBrowserCookies("old-socket/true", phone))
+        val server = YandexVerificationPolicy.browserCookieRoute("new-socket", true)
+        assertTrue(YandexVerificationPolicy.shouldResetBrowserCookies(phone, server))
+        assertTrue(YandexVerificationPolicy.shouldResetBrowserCookies("old-socket/true", server))
+        assertFalse(YandexVerificationPolicy.shouldResetBrowserCookies(server, server))
+    }
     @Test fun checkpointMayBeOnTheHostOrPath() {
         for (url in listOf("https://captcha.yandex.ru/", "https://smartcaptcha.yandex.ru/", "https://passport.yandex.kz/", "https://docs.yandex.ru/showcaptcha", "https://smartcaptcha.yandexcloud.net/", "about:blank")) {
             assertTrue(url, YandexVerificationPolicy.isCheckpoint(url))
