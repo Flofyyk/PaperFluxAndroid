@@ -35,6 +35,7 @@ internal object ProfileConfig {
                 .put("clientIp", uri.getQueryParameter("ip")).put("documentUrl", uri.getQueryParameter("doc"))
                 .put("transport", uri.getQueryParameter("transport") ?: "yandex").put("server", uri.getQueryParameter("server"))
                 .put("volgaUrl", uri.getQueryParameter("volga") ?: "")
+                .put("activationRequired", uri.getQueryParameter("activate") == "1")
                 .put("name", uri.getQueryParameter("name") ?: "PaperFlux")
         } else JSONObject(raw)
         val id = source.optString("id").trim()
@@ -56,9 +57,10 @@ internal object ProfileConfig {
             }
         }
         check(server.isNotBlank() && server.length <= 253 && !server.any { it.isWhitespace() || it in "/@?#\\" }) { "В конфиге неверный адрес сервера" }
-        check(ip.matches(Regex("10\\.10\\.10\\.(?:[1-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-4])"))) { "Некорректный виртуальный IP" }
+        check(ProfileAddress.valid(ip)) { "Некорректный виртуальный IP" }
         val result = JSONObject().put("id", id).put("token", token).put("clientIp", ip)
             .put("documentUrl", docs.joinToString(",")).put("documentUrls", JSONArray(docs)).put("server", server).put("name", name).put("transport", provider)
+        if (source.optBoolean("activationRequired")) result.put("activationRequired", true)
         if (volgaUrl.isNotEmpty()) result.put("volgaUrl", volgaUrl)
         source.optJSONArray("alternatives")?.let { alternatives ->
             require(alternatives.length() in 1..7) { "Нужно от 2 до 8 серверов" }
@@ -103,6 +105,7 @@ internal object ProfileConfig {
             .appendQueryParameter("ip", p.getString("clientIp")).appendQueryParameter("transport", p.getString("transport"))
             .appendQueryParameter("doc", p.getString("documentUrl")).appendQueryParameter("token", p.getString("token"))
         p.optString("volgaUrl").takeIf { it.isNotEmpty() }?.let { builder.appendQueryParameter("volga", it) }
+        if (p.optBoolean("activationRequired")) builder.appendQueryParameter("activate", "1")
         return builder.build().toString()
     }
     fun documents(value: String) = value.split(Regex("[;,\\n\\r]+")).map { it.trim() }.filter { it.isNotEmpty() }.distinct()

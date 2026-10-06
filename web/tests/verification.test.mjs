@@ -10,6 +10,10 @@ test("connected VPN does not make verification or cookie delivery successful", (
   assert.equal(detailLevel("CONNECTED", "Шифрованный туннель: DNS и TCP подтверждены"), "success");
   assert.equal(detailLevel("ERROR", "Связь прервана"), "error");
 });
+test("submission has an explicit non-success checking phase", () => {
+  assert.equal(readVerification({carrier:"документ 1", side:"VPS", checking:true}).checking, true);
+  assert.equal(readVerification({carrier:"документ 1", side:"VPS", checking:"true"}).checking, undefined);
+});
 test("public verification state is validated and never propagates private fields", () => {
   assert.equal(readVerification(null), null);
   assert.equal(readVerification({ carrier: "документ 2", side: "unknown" }), null);

@@ -21,18 +21,39 @@ internal class AuthRequestQueue {
         val id = request.optString("requestId")
         if (id.isEmpty() || id in completed) return false
         val empty = requests.isEmpty()
-        if (requests.containsKey(id) || requests.size < 8) requests[id] = request
+        if (requests.containsKey(id) || requests.size < 8) {
+            if (requests[id]?.optBoolean("submitted") == true) {
+                request.put("submitted", true).put("submittedAt", requests[id]!!.optLong("submittedAt"))
+            }
+            requests[id] = request
+        }
         return empty && requests.isNotEmpty()
     }
     fun acknowledge(id: String): Boolean {
         val active = requests.keys.firstOrNull() == id
+        val finished = requests[id]
         requests.remove(id)
+        // Prefer completing one phone/VPS document pair over opening every
+        // local document first. One verified data lane can bring the VPN up.
+        if (active && finished != null && finished.optString("transport").isNotBlank()) {
+            val companion = requests.values.firstOrNull {
+                it.optString("transport") == finished.optString("transport") &&
+                    it.optBoolean("remote") != finished.optBoolean("remote")
+            }
+            if (companion != null) {
+                val remaining = LinkedHashMap(requests)
+                requests.clear()
+                requests[companion.optString("requestId")] = companion
+                remaining.forEach { (key, value) -> if (key != companion.optString("requestId")) requests[key] = value }
+            }
+        }
         if (id.isNotEmpty()) {
             completed.add(id)
             if (completed.size > 64) completed.remove(completed.first())
         }
         return active
     }
+    fun submitted(id: String): JSONObject? = requests[id]?.apply { put("submitted", true).put("submittedAt", System.currentTimeMillis()) }
     fun acknowledgeResult(id: String, onAccepted: (JSONObject) -> Unit, onCurrentChanged: () -> Unit) {
         val request = requests[id]
         val changed = acknowledge(id)
@@ -92,9 +113,11 @@ object NativeAuthBridge {
         if (request.optString("requestId").isBlank() || age !in 0..1_800_000 ||
             !YandexVerificationPolicy.allows(request.optString("url"))) return null
         // Public UI payload: never expose request URLs, cookies or socket paths.
+        val retry = request.optBoolean("submitted") && System.currentTimeMillis() - request.optLong("submittedAt") >= 30_000
         return JSONObject().put("carrier", YandexVerificationPolicy.carrierLabel(request.optString("transport")))
             .put("side", if (request.optBoolean("remote")) "VPS" else "телефон")
-            .put("automatic", !vpnConnected && !wasAutoOpened(context, request) && System.currentTimeMillis() >= autoOpenDismissedUntil(context, request))
+            .put("checking", request.optBoolean("submitted") && !retry).put("retry", retry)
+            .put("automatic", !request.optBoolean("submitted") && !vpnConnected && !wasAutoOpened(context, request) && System.currentTimeMillis() >= autoOpenDismissedUntil(context, request))
     }
     internal fun cookieKey(provider: String, document: String): String = MessageDigest.getInstance("SHA-256")
         .digest("$provider\u0000$document".toByteArray(Charsets.UTF_8)).joinToString("") { "%02x".format(it.toInt() and 255) }
@@ -140,8 +163,10 @@ object NativeAuthBridge {
         if (changed) { write(target, stored); write(file, pending) }
     }
     fun read(file: File): JSONObject? = runCatching {
-        if (!file.exists() || file.length() > 65536) return null
-        JSONObject(AtomicFile(file).readFully().toString(Charsets.UTF_8))
+        if (file.length() > 65536 || File(file.path + ".bak").length() > 65536) return null
+        val bytes = AtomicFile(file).readFully()
+        require(bytes.size <= 65536)
+        JSONObject(bytes.toString(Charsets.UTF_8))
     }.getOrNull()
     fun write(file: File, value: JSONObject) {
         val bytes = value.toString().toByteArray(Charsets.UTF_8)
@@ -213,6 +238,12 @@ object NativeAuthBridge {
                             if (line.startsWith("AUTH_UPDATED:")) synchronized(lock) {
                                 val id = line.removePrefix("AUTH_UPDATED:")
                                 queue.acknowledgeResult(id, onAccepted, ::displayNext)
+                            } else if (line.startsWith("AUTH_SUBMITTED:")) synchronized(lock) {
+                                val id = line.removePrefix("AUTH_SUBMITTED:")
+                                val request = queue.submitted(id)
+                                if (request != null && queue.current()?.optString("requestId") == id) {
+                                    write(requestFile, request); onRequest(request)
+                                }
                             }
                         }
                     }

@@ -1,12 +1,12 @@
 import type { LogLevel } from "../types";
 
-export interface VerificationState { carrier: string; side: "телефон" | "VPS"; automatic: boolean }
+export interface VerificationState { carrier: string; side: "телефон" | "VPS"; automatic: boolean; checking?: boolean; retry?: boolean }
 
 export function readVerification(value: unknown): VerificationState | null {
   if (!value || typeof value !== "object") return null;
   const v = value as Partial<VerificationState>;
   if (typeof v.carrier !== "string" || (v.side !== "телефон" && v.side !== "VPS")) return null;
-  return { carrier: v.carrier.slice(0, 48), side: v.side, automatic: v.automatic === true };
+  return { carrier: v.carrier.slice(0, 48), side: v.side, automatic: v.automatic === true, ...(v.checking === true ? { checking: true } : {}), ...(v.retry === true ? { retry: true } : {}) };
 }
 
 export function isVerificationWarning(message: string): boolean {

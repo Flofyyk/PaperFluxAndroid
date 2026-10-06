@@ -34,6 +34,8 @@ import java.util.concurrent.TimeUnit
 
 class OpenFluxVpnService : VpnService() {
     private val worker = Executors.newSingleThreadExecutor()
+    private val leaseWorker = Executors.newSingleThreadScheduledExecutor()
+    @Volatile private var leaseFuture: ScheduledFuture<*>? = null
     /** The only scheduler allowed to start a replacement session. */
     private val reconnectWorker = Executors.newSingleThreadScheduledExecutor()
     private val reconnectScheduled = AtomicBoolean(false)
@@ -200,7 +202,24 @@ class OpenFluxVpnService : VpnService() {
             hasStandbyServers = candidates.size > 1
             val selectedKey = serverFailover.choose(candidates.map { nodeKey(it) }, android.os.SystemClock.elapsedRealtime())
                 ?: error("Все серверы временно недоступны. Ожидаем следующую попытку")
-            val identity = candidates.first { nodeKey(it) == selectedKey }
+            var identity = candidates.first { nodeKey(it) == selectedKey }
+            if (identity.optBoolean("activationRequired")) {
+                publish("CONNECTING", "Запускаем канал на выбранном VPS")
+                identity = ProfileActivationClient.activate(identity) { current() }
+                if (!current()) return
+                if (identity.optBoolean("activationRequired")) {
+                    val leaseProfile = org.json.JSONObject(identity.toString())
+                    leaseFuture = leaseWorker.scheduleWithFixedDelay({
+                        if (!current()) return@scheduleWithFixedDelay
+                        val reply = runCatching { ProfileActivationClient.exchange(leaseProfile) }.getOrNull()
+                        if (current() && reply?.optString("activation") == "denied") {
+                            worker.execute {
+                                if (current()) { publish("ERROR", "Профиль заблокирован или квота исчерпана"); stopTunnel(announce = false) }
+                            }
+                        }
+                    }, 30, 30, TimeUnit.SECONDS)
+                }
+            }
             val changedNode = endpointKey != null && endpointKey != selectedKey
             endpointKey = selectedKey
             attemptedNode = true
@@ -304,7 +323,8 @@ class OpenFluxVpnService : VpnService() {
                 val location = if (request.optBoolean("remote")) "VPS" else "телефон"
                 val carrier = YandexVerificationPolicy.carrierLabel(request.optString("transport"))
                 val healthy = tunnelRunning && nativeTunnelReady
-                authActionRequired = YandexCheckPresentation.required(carrier, location, healthy)
+                authActionRequired = if (request.optBoolean("submitted")) "Результат передан. Проверяем доступ к Яндексу — $carrier, $location"
+                    else YandexCheckPresentation.required(carrier, location, healthy)
                 // Keep the tunnel's state healthy. An auxiliary document's
                 // check belongs in a separate scoped journal/notification.
                 if (healthy) publishEvent(authActionRequired!!)
@@ -437,9 +457,8 @@ class OpenFluxVpnService : VpnService() {
                     tunnelRunning = false
                     statsRunning = false
                     publish("RECONNECTING", "Восстанавливаем соединение с $providerName")
-                    // A pool keeps the Android route during automatic retry;
-                    // manual stop always closes it. Other profiles retain the
-                    // historical cleanup behavior.
+                    // Every profile keeps its Android route during automatic
+                    // retry. Manual stop always closes it.
                     sessionGeneration.incrementAndGet()
                     releaseTunnelResources(keepTun = keepVpnDuringFailover())
                     recordServerFailure()
@@ -598,9 +617,10 @@ class OpenFluxVpnService : VpnService() {
         synchronized(workerSockets) { workerSockets.forEach { runCatching { it.close() } }; workerSockets.clear() }
         synchronized(workerProcesses) { workerProcesses.forEach { runCatching { it.destroy() } }; workerProcesses.clear() }
     }
-    private fun keepVpnDuringFailover() = hasStandbyServers && wantsConnection() && autoReconnectEnabled() &&
-        !stopping && authActionRequired == null && hasUnderlyingInternet()
+    private fun keepVpnDuringFailover() = VpnRecoveryPolicy.retainInterface(
+        wantsConnection(), autoReconnectEnabled(), stopping)
     private fun releaseTunnelResources(keepTun: Boolean = false) {
+        leaseFuture?.cancel(false); leaseFuture = null
         stopProcessOnly()
         if (!keepTun) { runCatching { tun?.close() }; tun = null; tunConfiguration = null }
         for (name in listOf("auth-request.json", "auth-offer.json", "auth-command.json")) File(noBackupFilesDir, name).delete()
@@ -759,7 +779,7 @@ class OpenFluxVpnService : VpnService() {
             publish("RECONNECTING", "Применяем исключения приложений")
             worker.execute {
                 if (generation == appRoutingGeneration.get() && replacement == sessionGeneration.get() && wantsConnection() && !stopping) {
-                    releaseTunnelResources()
+                    releaseTunnelResources(keepTun = keepVpnDuringFailover())
                     startTunnel()
                 }
             }
@@ -775,7 +795,7 @@ class OpenFluxVpnService : VpnService() {
         reconnectFuture?.cancel(false); reconnectFuture = null
         reconnectScheduled.set(false); reconnectAttempt = 0
     }
-    /** Replace a failed native path; a pool can retain its Android interface. */
+    /** Replace a failed native path without removing the Android VPN route. */
     private fun scheduleFullRecovery(reason: String) {
         if (!fullRecoveryScheduled.compareAndSet(false, true)) return
         val generation = recoveryGeneration.incrementAndGet()
@@ -816,7 +836,7 @@ class OpenFluxVpnService : VpnService() {
         statsRunning = false
         networkWatchRunning = false
         cancelFullRecovery()
-        releaseTunnelResources()
+        releaseTunnelResources(keepTun = keepVpnDuringFailover())
         publish("WAITING_NETWORK", "Интернет недоступен. Ожидаем Wi‑Fi или мобильную сеть")
         startForeground(NOTIFICATION_ID, notification("PaperFlux: ожидаем сеть"))
     }
@@ -907,7 +927,7 @@ class OpenFluxVpnService : VpnService() {
     override fun onDestroy() {
         stopTunnel(announce = false, clearDesired = false)
         runCatching { getSystemService(ConnectivityManager::class.java).unregisterNetworkCallback(networkCallback) }
-        worker.shutdownNow(); reconnectWorker.shutdownNow(); super.onDestroy()
+        worker.shutdownNow(); leaseWorker.shutdownNow(); reconnectWorker.shutdownNow(); super.onDestroy()
     }
     override fun onRevoke() {
         // Android revoked the system VPN permission.  There is no usable TUN

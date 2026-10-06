@@ -18,16 +18,42 @@ class AuthRequestQueueTest {
         try {
             NativeAuthBridge.write(File(dir, "auth-request.json"), request)
             val visible = requireNotNull(NativeAuthBridge.verificationState(context, true))
-            assertEquals(setOf("carrier", "side", "automatic"), visible.keys().asSequence().toSet())
+            assertEquals(setOf("carrier", "side", "automatic", "checking", "retry"), visible.keys().asSequence().toSet())
             assertEquals("документ 2", visible.getString("carrier"))
             assertEquals("VPS", visible.getString("side"))
             assertTrue(visible.getBoolean("automatic"))
+            assertFalse(visible.getBoolean("checking"))
+            assertFalse(visible.getBoolean("retry"))
             assertFalse(NativeAuthBridge.verificationState(context, true, vpnConnected = true)!!.getBoolean("automatic"))
             assertNull(NativeAuthBridge.verificationState(context, false))
             NativeAuthBridge.rememberAutoOpen(context, request)
             assertFalse(NativeAuthBridge.verificationState(context, true)!!.getBoolean("automatic"))
             request.put("created", System.currentTimeMillis() - 1_800_001)
             NativeAuthBridge.write(File(dir, "auth-request.json"), request)
+            assertNull(NativeAuthBridge.verificationState(context, true))
+        } finally { dir.listFiles()?.forEach { it.delete() }; dir.delete() }
+    }
+    @Test fun publicSubmissionWaitsForConfirmationAndThenOffersRetryWithoutAutomaticLoop() {
+        val base = InstrumentationRegistry.getInstrumentation().targetContext
+        val dir = File(base.cacheDir, "verification-submit-${System.nanoTime()}").apply { mkdir() }
+        val context = object : ContextWrapper(base) { override fun getNoBackupFilesDir(): File = dir }
+        val request = JSONObject().put("requestId", "test-id").put("attempt", "test-attempt")
+            .put("transport", "yandex-1").put("created", System.currentTimeMillis())
+            .put("url", "https://disk.yandex.ru/i/test-only").put("submitted", true)
+            .put("submittedAt", System.currentTimeMillis())
+        try {
+            NativeAuthBridge.write(File(dir, "auth-request.json"), request)
+            val checking = requireNotNull(NativeAuthBridge.verificationState(context, true))
+            assertTrue(checking.getBoolean("checking"))
+            assertFalse(checking.getBoolean("retry"))
+            assertFalse(checking.getBoolean("automatic"))
+            request.put("submittedAt", System.currentTimeMillis() - 31_000)
+            NativeAuthBridge.write(File(dir, "auth-request.json"), request)
+            val retry = requireNotNull(NativeAuthBridge.verificationState(context, true))
+            assertFalse(retry.getBoolean("checking"))
+            assertTrue(retry.getBoolean("retry"))
+            assertFalse(retry.getBoolean("automatic"))
+            File(dir, "auth-request.json").delete()
             assertNull(NativeAuthBridge.verificationState(context, true))
         } finally { dir.listFiles()?.forEach { it.delete() }; dir.delete() }
     }
@@ -138,6 +164,28 @@ class AuthRequestQueueTest {
         } finally { dir.listFiles()?.forEach { it.delete() }; dir.delete() }
     }
     private fun request(id: String, remote: Boolean) = JSONObject().put("requestId", id).put("remote", remote)
+    @Test fun submittedCheckRemainsPendingAndRepeatedRequestPreservesPhase() {
+        val queue = AuthRequestQueue()
+        queue.accept(request("check", false))
+        queue.accept(request("next", true))
+        assertNull(queue.submitted("stale"))
+        assertTrue(queue.submitted("check")!!.optBoolean("submitted"))
+        queue.accept(request("check", false))
+        assertTrue(queue.current()!!.optBoolean("submitted"))
+        assertEquals("check", queue.current()!!.getString("requestId"))
+        queue.acknowledge("check")
+        assertEquals("next", queue.current()!!.getString("requestId"))
+    }
+    @Test fun onePhoneServerDocumentPairHasPriorityOverEveryLocalDocument() {
+        val queue = AuthRequestQueue()
+        queue.accept(request("local-1", false).put("transport", "yandex-1"))
+        queue.accept(request("local-2", false).put("transport", "yandex-2"))
+        queue.accept(request("server-1", true).put("transport", "yandex-1"))
+        queue.acknowledge("local-1")
+        assertEquals("server-1", queue.current()!!.getString("requestId"))
+        queue.acknowledge("server-1")
+        assertEquals("local-2", queue.current()!!.getString("requestId"))
+    }
     @Test fun lateDuplicateCannotReopenCompletedCheck() {
         val queue = AuthRequestQueue()
         assertTrue(queue.accept(request("check", false)))

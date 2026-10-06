@@ -41,11 +41,21 @@ class YandexAuthActivity : AppCompatActivity() {
     private var pageFailed = false
     private var pageComplete = false
     private var submitted = false
+    private var submittedAt = 0L
     private var checkingPage = false
     private val checkHandler = android.os.Handler(android.os.Looper.getMainLooper())
     private val automaticResultCheck = object : Runnable {
         override fun run() {
             if (isFinishing || isDestroyed) return
+            if (submitted && pending != null) {
+                val live = NativeAuthBridge.read(File(noBackupFilesDir, "auth-request.json"))
+                if (live?.optString("requestId") != pending?.optString("requestId") || live?.optString("attempt") != pending?.optString("attempt")) {
+                    finish(); return
+                }
+                if (android.os.SystemClock.elapsedRealtime() - submittedAt >= 30_000 && !pageFailed) {
+                    showLoadError("Cookies переданы, но документ ещё не подключился. Повторите проверку; передача результата не подтверждает доступ.")
+                }
+            }
             val automaticHealthy = intent.getBooleanExtra("automatic", false) && TunnelSnapshot.read(this@YandexAuthActivity).optString("state") == "CONNECTED"
             if (automaticHealthy && !YandexCheckPresentation.shouldDeferAutomaticDismissal(
                     checkingPage, submitted, pending != null, pageComplete, pageFailed, isCheckpoint(currentUrl))) {
@@ -104,7 +114,8 @@ class YandexAuthActivity : AppCompatActivity() {
         findViewById<Button>(R.id.auth_retry).setOnClickListener {
             errorView?.visibility = View.GONE
             pageFailed = false
-            browser?.reload()
+            submitted = false
+            browser?.loadUrl(startUrl)
         }
         statusView = findViewById(R.id.auth_status)
         progressView = findViewById(R.id.auth_loading)
@@ -244,7 +255,7 @@ class YandexAuthActivity : AppCompatActivity() {
                 .put("remote", request.optBoolean("remote")).put("jar", values)
             YandexVerificationPolicy.cookieDomain(currentUrl)?.let { offer.put("domain", it) }
             runCatching { NativeAuthBridge.write(File(noBackupFilesDir, "auth-offer.json"), offer); jar.flush() }
-                .onSuccess { submitted = true; setStatus("Результат передан. Проверяем доступ к Яндексу", Color.rgb(130, 220, 170)); browser?.postDelayed({ finish() }, 900) }
+                .onSuccess { submitted = true; submittedAt = android.os.SystemClock.elapsedRealtime(); setStatus("Результат передан. Ждём подтверждения доступа к документу", Color.rgb(255, 213, 128)) }
                 .onFailure { setStatus("Не удалось передать результат. Попробуйте ещё раз", Color.rgb(255, 177, 177)) }
             return
         }

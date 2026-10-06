@@ -18,6 +18,8 @@
 
 PaperFlux Android connects applications to a PaperFlux server through an encrypted document transport. A configured server and an access profile are required.
 
+The [0.4.21-rc.1 public test release](https://github.com/Flofyyk/PaperFluxAndroid/releases/tag/v0.4.21-rc.1) is available separately from stable releases. It includes Yandex verification fixes, the expanded virtual address pool and VPN-interface retention during automatic recovery. See the [test scope and known limitations](https://github.com/Flofyyk/PaperFlux/blob/main/docs/PUBLIC_BETA.md).
+
 ## Features
 
 - Connection profiles with editing, diagnostics and configuration sharing.
@@ -73,6 +75,10 @@ Verification cookies are retained between phone connections and are not replaced
 When verification is needed to connect, its window opens automatically while the app is visible. Repeated requests from the same channel do not create a series of windows. Once the VPN is working, auxiliary-channel checks do not interrupt the screen and remain accessible from the notification. A CAPTCHA, if shown by Yandex, must be completed manually; the app submits the result automatically afterwards.
 
 The Connected state requires an authenticated session and successful DNS/TCP checks. Disconnected document channels recover in the background. When the device is offline, the app waits for network connectivity; manual disconnection cancels recovery.
+
+In 0.4.21-rc.1, automatic reconnection keeps the VPN interface during recovery and network loss, including single-server profiles. Manual disconnect closes it. This does not protect against OS termination or VPN permission revocation; excluded apps still intentionally use the underlying network.
+
+Configurations requiring activation (`activationRequired`) contact profile discovery on TCP 24000 before tunnel startup. They require a compatible manager and direct server reachability. Use a regular, already running profile when allowlisted networks prevent that access.
 
 Backup sets contain separate configurations for already deployed servers. Switching requires automatic reconnection to be enabled. Changing VPS requires open TCP connections to be established again.
 

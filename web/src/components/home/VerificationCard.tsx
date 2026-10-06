@@ -9,14 +9,13 @@ export function VerificationCard({ verification, onOpen }: {
       <div className="flex items-start gap-3">
         <ShieldAlert aria-hidden="true" className="mt-0.5 h-6 w-6 shrink-0 text-warning" />
         <div className="min-w-0">
-          <p className="text-[15px] font-bold text-warning">Требуется подтверждение Яндекса</p>
+          <p className="text-[15px] font-bold text-warning">{verification.checking ? "Проверяем результат" : verification.retry ? "Доступ пока не подтверждён" : "Требуется подтверждение Яндекса"}</p>
           <p className="mt-1 text-[13px] font-semibold text-on-warning-container">{verification.carrier} · {verification.side}</p>
           <p className="mt-1 text-[13px] leading-snug text-on-warning-container/85">
-            Подключение ожидает подтверждения доступа.
+            {verification.checking ? "Результат отправлен. Ждём реального подключения документа." : verification.retry ? "Cookies переданы, но документ ещё не подключился. Откройте страницу повторно." : "Подключение ожидает подтверждения доступа."}
           </p>
           <p className="mt-2 text-[12px] leading-snug text-on-warning-container/80">
-            {verification.automatic ? "Окно проверки откроется автоматически." : "Окно этого канала уже показывалось. Повторный запрос не открывает его снова."}
-            {" "}После подтверждения результат передастся автоматически.
+            {verification.checking ? "Статус исчезнет после подтверждения доступа, а не после отправки cookies." : verification.automatic ? "Окно проверки откроется автоматически." : "Окно этого канала уже показывалось. Если Яндекс не принял результат, откройте его повторно."}
           </p>
         </div>
       </div>
