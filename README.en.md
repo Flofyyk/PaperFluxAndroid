@@ -18,7 +18,7 @@
 
 PaperFlux Android connects applications to a PaperFlux server through an encrypted document transport. A configured server and an access profile are required.
 
-The [0.4.22 release](https://github.com/Flofyyk/PaperFluxAndroid/releases/tag/v0.4.22) includes core `0.5.13`, disabled RACK/TLP for Yandex and Mail.ru, improved Mail.ru reconnection and private-data redaction in native logs. APKs use the non-debuggable release build and retain the existing signing certificate for in-place updates. See the [deployment scope and known limitations](https://github.com/Flofyyk/PaperFlux/blob/main/docs/PUBLIC_BETA.md).
+The [0.4.22 release](https://github.com/Flofyyk/PaperFluxAndroid/releases/tag/v0.4.22) includes core `0.5.13`, disabled RACK/TLP for Yandex and Mail.ru, improved Mail.ru reconnection and private-data redaction in native logs.
 
 ## Features
 
@@ -76,7 +76,7 @@ When verification is needed to connect, its window opens automatically while the
 
 The Connected state requires an authenticated session and successful DNS/TCP checks. Disconnected document channels recover in the background. When the device is offline, the app waits for network connectivity; manual disconnection cancels recovery.
 
-In 0.4.21-rc.1, automatic reconnection keeps the VPN interface during recovery and network loss, including single-server profiles. Manual disconnect closes it. This does not protect against OS termination or VPN permission revocation; excluded apps still intentionally use the underlying network.
+Automatic reconnection keeps the VPN interface during recovery and network loss, including single-server profiles. Manual disconnect closes it. This does not protect against OS termination or VPN permission revocation; excluded apps still intentionally use the underlying network.
 
 Configurations requiring activation (`activationRequired`) contact profile discovery on TCP 24000 before tunnel startup. They require a compatible manager and direct server reachability. Use a regular, already running profile when allowlisted networks prevent that access.
 
