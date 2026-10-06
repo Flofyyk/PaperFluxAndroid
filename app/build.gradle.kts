@@ -5,8 +5,8 @@ android { namespace = "com.accar.openflux"; compileSdk = 35
         applicationId = "com.accar.openflux"
         minSdk = 26
         targetSdk = 35
-        versionCode = 35
-        versionName = "0.4.21-rc.1"
+        versionCode = 38
+        versionName = "0.4.22"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         ndk { abiFilters += listOf("armeabi-v7a", "arm64-v8a", "x86", "x86_64") }
     }
@@ -25,9 +25,19 @@ android { namespace = "com.accar.openflux"; compileSdk = 35
         jniLibs.useLegacyPackaging = true
         jniLibs.excludes += "**/libopenflux-worker.so"
     }
-    buildTypes { getByName("debug") {
-        buildConfigField("String", "RELAY_TOKEN", "\"${project.findProperty("relayToken") ?: ""}\"")
-    } }
+    buildTypes {
+        getByName("debug") {
+            buildConfigField("String", "RELAY_TOKEN", "\"${project.findProperty("relayToken") ?: ""}\"")
+        }
+        getByName("release") {
+            // Keep the existing installation certificate so updates preserve
+            // profiles. Release disables debugging; never distribute this key.
+            signingConfig = signingConfigs.getByName("debug")
+            isDebuggable = false
+            isMinifyEnabled = false
+            buildConfigField("String", "RELAY_TOKEN", "\"\"")
+        }
+    }
     compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
     kotlinOptions { jvmTarget = "17" }
 }

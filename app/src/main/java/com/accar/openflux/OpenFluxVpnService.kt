@@ -308,10 +308,11 @@ class OpenFluxVpnService : VpnService() {
                 directory(filesDir); redirectErrorStream(true)
                 environment()["LD_LIBRARY_PATH"] = applicationInfo.nativeLibraryDir
                 environment()["PAPERFLUX_SESSION_COOKIES"] = File(noBackupFilesDir, "session-cookies-$cookieNamespace.json").absolutePath
+                if (provider in setOf("yandex", "vyandex", "mailru")) {
+                    environment()["PAPERFLUX_TCP_RECOVERY"] = "classic"
+                }
                 if (provider == "mailru") {
-                    environment()["PAPERFLUX_TCP_RECOVERY"] = "default"
-                    environment()["PAPERFLUX_TCP_BUFFER_KIB"] = "1024"
-                    environment()["PAPERFLUX_TCP_BUFFER_MAX_KIB"] = "1024"
+                    environment()["PAPERFLUX_TCP_BUFFER_PRESET"] = "upstream"
                 }
             }.start()
             publish("TRANSPORT", if (provider == "yandex" && volgaUrl.isNotEmpty()) "Подключаем Яндекс Документы и резерв Volga" else if (provider == "yandex" && documentUrls.size > 1) "Подключаем ${documentUrls.size} канала Яндекс Документов" else "Подключаем $providerName")
@@ -870,14 +871,12 @@ class OpenFluxVpnService : VpnService() {
             "internet недоступен" in lower || "активного подключения" in lower -> message
             "permission" in lower || "vpn" in lower -> "VPN: нет разрешения Android"
             "tun" in lower || "descriptor" in lower -> "Не удалось создать VPN-интерфейс"
-            "poll" in lower || "http" in lower || "websocket" in lower || "network" in lower -> "Не удалось связаться с Yandex Docs. Проверьте интернет и повторите попытку"
+            "poll" in lower || "http" in lower || "websocket" in lower || "network" in lower -> "Не удалось связаться с документным каналом. Проверьте интернет и повторите попытку"
             "document" in lower || "config" in lower -> "Не удалось открыть документ. Проверьте профиль и ссылку"
             else -> "Не удалось запустить защищённое соединение. Повторите попытку"
         }
     }
-    private fun redactNativeLog(value: String): String = value
-        .replace(Regex("(?i)(token|sign|access_token|cookie)=?[^&\\s]+"), "$1=<скрыто>")
-        .take(240)
+    private fun redactNativeLog(value: String): String = NativeLogRedactor.redact(value)
     private fun publishEvent(event: String) {
         // Native output can repeat the same dial/refused message hundreds of
         // times during a reconnect. Keep the journal useful and avoid

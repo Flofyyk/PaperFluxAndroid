@@ -18,7 +18,7 @@
 
 PaperFlux Android connects applications to a PaperFlux server through an encrypted document transport. A configured server and an access profile are required.
 
-The [0.4.21-rc.1 public test release](https://github.com/Flofyyk/PaperFluxAndroid/releases/tag/v0.4.21-rc.1) is available separately from stable releases. It includes Yandex verification fixes, the expanded virtual address pool and VPN-interface retention during automatic recovery. See the [test scope and known limitations](https://github.com/Flofyyk/PaperFlux/blob/main/docs/PUBLIC_BETA.md).
+The [0.4.22 release](https://github.com/Flofyyk/PaperFluxAndroid/releases/tag/v0.4.22) includes core `0.5.13`, disabled RACK/TLP for Yandex and Mail.ru, improved Mail.ru reconnection and private-data redaction in native logs. APKs use the non-debuggable release build and retain the existing signing certificate for in-place updates. See the [deployment scope and known limitations](https://github.com/Flofyyk/PaperFlux/blob/main/docs/PUBLIC_BETA.md).
 
 ## Features
 
