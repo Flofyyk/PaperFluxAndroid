@@ -42,21 +42,24 @@ class YandexAuthActivity : AppCompatActivity() {
     private var pageComplete = false
     private var submitted = false
     private var submittedAt = 0L
+    private var submittedCookies: Map<String, String>? = null
     private var checkingPage = false
     private val checkHandler = android.os.Handler(android.os.Looper.getMainLooper())
     private val automaticResultCheck = object : Runnable {
         override fun run() {
             if (isFinishing || isDestroyed) return
-            if (submitted && pending != null) {
+            if (pending != null) {
                 val live = NativeAuthBridge.read(File(noBackupFilesDir, "auth-request.json"))
                 if (live?.optString("requestId") != pending?.optString("requestId") || live?.optString("attempt") != pending?.optString("attempt")) {
                     finish(); return
                 }
-                if (android.os.SystemClock.elapsedRealtime() - submittedAt >= 30_000 && !pageFailed) {
-                    showLoadError("Cookies переданы, но документ ещё не подключился. Повторите проверку; передача результата не подтверждает доступ.")
+                if (submitted && android.os.SystemClock.elapsedRealtime() - submittedAt >= 30_000 && !pageFailed) {
+                    setStatus("Документ ещё подключается. Можно повторно передать результат кнопкой ниже", Color.rgb(255, 213, 128))
                 }
             }
-            val automaticHealthy = intent.getBooleanExtra("automatic", false) && TunnelSnapshot.read(this@YandexAuthActivity).optString("state") == "CONNECTED"
+            val automaticHealthy = YandexCheckPresentation.canDismissForReadyTunnel(
+                intent.getBooleanExtra("automatic", false), submitted,
+                TunnelSnapshot.read(this@YandexAuthActivity).optString("state") == "CONNECTED")
             if (automaticHealthy && !YandexCheckPresentation.shouldDeferAutomaticDismissal(
                     checkingPage, submitted, pending != null, pageComplete, pageFailed, isCheckpoint(currentUrl))) {
                 // An alternative channel recovered. Do not keep a modal check
@@ -65,7 +68,7 @@ class YandexAuthActivity : AppCompatActivity() {
             }
             // CAPTCHA can finish via AJAX without navigating. Inspect only
             // readiness; never click, solve or send an incomplete challenge.
-            if (pending != null && !submitted && !pageFailed && pageComplete && currentUrl.isNotEmpty() && !isCheckpoint(currentUrl)) saveCookies(finishIfTunnelReady = automaticHealthy)
+            if (pending != null && !pageFailed && pageComplete && currentUrl.isNotEmpty() && !isCheckpoint(currentUrl)) saveCookies(finishIfTunnelReady = automaticHealthy)
             checkHandler.postDelayed(this, 1500)
         }
     }
@@ -110,7 +113,7 @@ class YandexAuthActivity : AppCompatActivity() {
         }
         findViewById<View>(R.id.auth_close).setOnClickListener { cancelCheck() }
         findViewById<Button>(R.id.auth_later).setOnClickListener { cancelCheck() }
-        findViewById<Button>(R.id.auth_confirm).setOnClickListener { saveCookies() }
+        findViewById<Button>(R.id.auth_confirm).setOnClickListener { saveCookies(forceRetry = true) }
         findViewById<Button>(R.id.auth_retry).setOnClickListener {
             errorView?.visibility = View.GONE
             pageFailed = false
@@ -202,8 +205,8 @@ class YandexAuthActivity : AppCompatActivity() {
         return YandexVerificationPolicy.allows(uri.toString())
     }
     private fun requestRoute(remote: Boolean) = YandexVerificationPolicy.browserCookieRoute(pending?.optString("attempt").orEmpty(), remote)
-    private fun saveCookies(finishIfTunnelReady: Boolean = false) {
-        if (submitted || checkingPage) return
+    private fun saveCookies(finishIfTunnelReady: Boolean = false, forceRetry: Boolean = false) {
+        if (checkingPage || (submitted && android.os.SystemClock.elapsedRealtime() - submittedAt < 5000)) return
         if (!pageComplete) { setStatus("Дождитесь загрузки страницы Яндекса"); return }
         if (!YandexVerificationPolicy.allows(currentUrl) || isCheckpoint(currentUrl) || pageFailed) {
             setStatus("Сначала завершите проверку на странице Яндекса", Color.rgb(255, 177, 177))
@@ -228,7 +231,7 @@ class YandexAuthActivity : AppCompatActivity() {
             })()
         """.trimIndent()) { result ->
             checkingPage = false
-            if (isFinishing || isDestroyed || submitted || pageFailed || currentUrl != checkedUrl) return@evaluateJavascript
+            if (isFinishing || isDestroyed || pageFailed || currentUrl != checkedUrl) return@evaluateJavascript
             if (result != "true") {
                 setStatus("Завершите проверку и дождитесь открытия документа")
                 // The page was still a challenge. Keep its native request,
@@ -236,10 +239,10 @@ class YandexAuthActivity : AppCompatActivity() {
                 if (finishIfTunnelReady && TunnelSnapshot.read(this).optString("state") == "CONNECTED") finish()
                 return@evaluateJavascript
             }
-            persistCookies()
+            persistCookies(forceRetry)
         }
     }
-    private fun persistCookies() {
+    private fun persistCookies(forceRetry: Boolean = false) {
         val jar = CookieManager.getInstance()
         pending?.let { request ->
             val live = NativeAuthBridge.read(File(noBackupFilesDir, "auth-request.json"))
@@ -249,13 +252,18 @@ class YandexAuthActivity : AppCompatActivity() {
             }
             val values = JSONObject()
             jar.flush()
-            YandexVerificationPolicy.collect(startUrl, currentUrl, jar::getCookie).forEach { (name, value) -> values.put(name, value) }
+            val collected = YandexVerificationPolicy.collect(startUrl, currentUrl, jar::getCookie)
+            collected.forEach { (name, value) -> values.put(name, value) }
             if (values.length() == 0) { setStatus("Сначала пройдите проверку Яндекса", Color.rgb(255, 177, 177)); return }
+            // The editor can finish its challenge via AJAX after the first page
+            // callback. Forward a changed jar, not one frozen early submission.
+            if (!YandexCookieSubmissionPolicy.shouldSend(if (submitted) submittedCookies else null,
+                    collected, forceRetry, android.os.SystemClock.elapsedRealtime() - submittedAt)) return
             val offer = JSONObject().put("attempt", request.optString("attempt")).put("requestId", request.optString("requestId")).put("transport", request.optString("transport"))
                 .put("remote", request.optBoolean("remote")).put("jar", values)
             YandexVerificationPolicy.cookieDomain(currentUrl)?.let { offer.put("domain", it) }
             runCatching { NativeAuthBridge.write(File(noBackupFilesDir, "auth-offer.json"), offer); jar.flush() }
-                .onSuccess { submitted = true; submittedAt = android.os.SystemClock.elapsedRealtime(); setStatus("Результат передан. Ждём подтверждения доступа к документу", Color.rgb(255, 213, 128)) }
+                .onSuccess { submitted = true; submittedCookies = collected.toMap(); submittedAt = android.os.SystemClock.elapsedRealtime(); setStatus("Результат передан. Ждём подтверждения доступа к документу", Color.rgb(255, 213, 128)) }
                 .onFailure { setStatus("Не удалось передать результат. Попробуйте ещё раз", Color.rgb(255, 177, 177)) }
             return
         }

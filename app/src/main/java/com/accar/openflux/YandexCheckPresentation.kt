@@ -12,6 +12,8 @@ internal object YandexCheckPresentation {
         "Яндекс: дополнительный канал ожидает проверки — $carrier, $side. VPN работает"
     else "Яндекс: требуется проверка — $carrier, $side"
     fun accepted(carrier: String, side: String) = "Доступ к документу подтверждён — $carrier, $side"
+    fun canDismissForReadyTunnel(automatic: Boolean, submitted: Boolean, tunnelReady: Boolean) =
+        tunnelReady && (automatic || submitted)
 
     // A recovered alternative lane is not permission to discard a completed
     // browser check before its cookies have been handed to the native process.

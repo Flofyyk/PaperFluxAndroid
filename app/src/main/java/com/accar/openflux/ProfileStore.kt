@@ -126,6 +126,9 @@ class ProfileStore(private val context: Context) {
         for (i in 0 until rows.length()) {
             rows.getJSONObject(i).apply {
                 remove("token")
+                val server = optString("server").trim().removePrefix("[").removeSuffix("]")
+                val countries = ProfileCountryCache(context)
+                (countries.forServer(server) ?: countries.forAddress(server))?.let { put("countryCode", it) }
                 put("serverCount", 1 + (optJSONArray("alternatives")?.length() ?: 0))
                 // Never expose standby credentials to the WebView either.
                 remove("alternatives")

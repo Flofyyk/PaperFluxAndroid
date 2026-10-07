@@ -16,6 +16,9 @@ internal class ProfileDiagnostics(private val context: Context) {
     fun inspect(id: String, ping: Boolean): JSONObject {
         val result = JSONObject().put("id", id)
         val server = ProfileStore(context).find(id).optString("server").trim().removePrefix("[").removeSuffix("]")
+        val countryCache = ProfileCountryCache(context)
+        // Read before DNS/network checks so offline diagnostics never erase a flag.
+        (countryCache.forServer(server) ?: countryCache.forAddress(server))?.let { result.put("countryCode", it) }
         val network = underlyingNetwork() ?: return result.put("error", "Нет доступной сети")
         val address = runCatching {
             val resolved = network.getAllByName(server)
@@ -23,7 +26,9 @@ internal class ProfileDiagnostics(private val context: Context) {
         }.getOrNull()
             ?: return result.put("error", "Адрес сервера не найден")
         result.put("address", address.hostAddress)
-        countryCode(network, address)?.let { result.put("countryCode", it) }
+        if (!result.has("countryCode")) countryCode(network, address)?.let {
+            result.put("countryCode", countryCache.remember(server, address.hostAddress.orEmpty(), it))
+        }
         if (!ping) return result
         result.put("latencyMs", 0)
         val echo = runCatching {
@@ -56,7 +61,7 @@ internal class ProfileDiagnostics(private val context: Context) {
         val cache = context.getSharedPreferences("profile-country-cache", Context.MODE_PRIVATE)
         val key = "country-$ip"
         val saved = cache.getString(key, null)
-        if (saved != null && System.currentTimeMillis() - cache.getLong("time-$ip", 0L) < 30L * 24 * 3600 * 1000) {
+        if (saved != null) {
             return saved.takeIf { it.matches(Regex("[A-Z]{2}")) }
         }
         // Only the public server IP is sent; no profile ID, name or credential.
