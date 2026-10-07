@@ -5,8 +5,8 @@ android { namespace = "com.accar.openflux"; compileSdk = 35
         applicationId = "com.accar.openflux"
         minSdk = 26
         targetSdk = 35
-        versionCode = 40
-        versionName = "0.4.24"
+        versionCode = 43
+        versionName = "0.4.25-mailru.1"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         ndk { abiFilters += listOf("armeabi-v7a", "arm64-v8a", "x86", "x86_64") }
     }
