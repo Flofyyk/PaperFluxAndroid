@@ -48,13 +48,13 @@ export function HomeScreen({
           {verification && !active && <div className="w-full"><VerificationCard verification={verification} onOpen={onOpenVerification} /></div>}
         </div>
 
-        <div className="flex flex-col gap-3.5 px-5 pb-8 @[420px]:grid @[420px]:grid-cols-2 @[420px]:gap-4 @[420px]:px-6">
-          <div className="@[420px]:col-span-2">
+        <div className="flex flex-col gap-3.5 px-5 pb-8 @[420px]:gap-4 @[420px]:px-6">
+          <div>
             <StatusCard status={status} />
           </div>
 
           {(status === "error" || status === "reconnecting") && errorReason && (
-            <div className="@[420px]:col-span-2">
+            <div>
               <DisconnectCard
                 reason={errorReason}
                 onRetry={onRetry}

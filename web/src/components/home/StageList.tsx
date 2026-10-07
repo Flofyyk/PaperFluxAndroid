@@ -24,7 +24,7 @@ function StageDot({ status }: { status: Stage["status"] }) {
 
 export const StageList = memo(function StageList({ stages }: { stages: Stage[] }) {
   return (
-    <Card>
+    <Card className="w-full min-w-0">
       <h3 className="mb-4 text-[14px] font-bold text-on-surface">Этапы подключения</h3>
       <div className="flex flex-col">
         {stages.map((s, i) => {
@@ -32,7 +32,7 @@ export const StageList = memo(function StageList({ stages }: { stages: Stage[] }
           const isLast = i === stages.length - 1;
           return (
             <div key={s.id} className="flex gap-3.5">
-              <div className="flex flex-col items-center">
+              <div className="flex shrink-0 flex-col items-center">
                 <StageDot status={s.status} />
                 {!isLast && (
                   <span
@@ -44,9 +44,9 @@ export const StageList = memo(function StageList({ stages }: { stages: Stage[] }
                 )}
               </div>
               <div className={cn("min-w-0 flex-1", !isLast && "pb-4")}>
-                <div className="flex items-center justify-between gap-2">
-                  <p className="text-[13.5px] font-semibold text-on-surface">{s.title}</p>
-                  <span className={cn("shrink-0 text-[11px] font-bold uppercase tracking-wide", m.text)}>
+                <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
+                  <p className="min-w-0 flex-1 basis-36 break-words text-[13.5px] font-semibold text-on-surface">{s.title}</p>
+                  <span className={cn("max-w-full text-[11px] font-bold uppercase tracking-wide", m.text)}>
                     {m.label}
                   </span>
                 </div>

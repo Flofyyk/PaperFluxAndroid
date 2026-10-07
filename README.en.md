@@ -18,7 +18,7 @@
 
 PaperFlux Android connects applications to a PaperFlux server through an encrypted document transport. A configured server and an access profile are required.
 
-The [0.4.23 release](https://github.com/Flofyyk/PaperFluxAndroid/releases/tag/v0.4.23) includes core `0.5.13`, disabled RACK/TLP for Yandex and Mail.ru, improved Mail.ru reconnection and private-data redaction in native logs. Verification results can be resubmitted and the verification window closes when the VPN recovers; the server flag is retained after the first successful lookup, even during network failures.
+The [0.4.24 release](https://github.com/Flofyyk/PaperFluxAndroid/releases/tag/v0.4.24) fixes the connection-stage card width and text wrapping on narrow screens and with enlarged text. Core `0.5.13`, disabled RACK/TLP for Yandex and Mail.ru, improved Mail.ru reconnection and private-data redaction in native logs remain unchanged. Verification results can be resubmitted and the verification window closes when the VPN recovers; the server flag is retained after the first successful lookup, even during network failures.
 
 ## Features
 
