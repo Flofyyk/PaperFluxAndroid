@@ -12,7 +12,7 @@ const items: { id: TabId; label: string; icon: typeof Home }[] = [
 
 export const BottomNav = memo(function BottomNav({ active, onChange }: { active: TabId; onChange: (t: TabId) => void }) {
   return (
-    <nav className="shrink-0 border-t border-outline-variant/40 bg-surface-container-low/95 px-2 pb-2.5 pt-1.5 backdrop-blur">
+    <nav aria-label="Навигация" className="pf-bottom-nav shrink-0 px-2 pb-2.5 pt-1.5">
       <div className="flex items-stretch justify-between">
         {items.map(({ id, label, icon: Icon }) => {
           const isActive = active === id;

@@ -11,7 +11,7 @@ const text: Record<ConnectionStatus, string> = {
 };
 
 const sub: Record<ConnectionStatus, string> = {
-  idle: "Yandex Docs · Engine.IO transport",
+  idle: "",
   connecting: "Проходим этапы инициализации туннеля",
   connected: "Сессия защищена, трафик маршрутизируется",
   error: "Проверьте журнал событий для деталей",
@@ -30,7 +30,7 @@ export const StatusHint = memo(function StatusHint({ status }: { status: Connect
   return (
     <div key={status} className="pf-fade-up flex flex-col items-center gap-1 text-center">
       <span className={cn("text-[19px] font-extrabold tracking-tight", color[status])}>{text[status]}</span>
-      <span className="text-[12.5px] font-medium text-on-surface-variant">{sub[status]}</span>
+      {sub[status] && <span className="text-[12.5px] font-medium text-on-surface-variant">{sub[status]}</span>}
     </div>
   );
 });

@@ -13,6 +13,7 @@ class RestartReceiver : BroadcastReceiver() {
         val service = Intent(context, OpenFluxVpnService::class.java).setAction(OpenFluxVpnService.START)
             .putExtra(OpenFluxVpnService.EXTRA_DOCUMENT_URL, prefs.getString("document", ""))
             .putExtra(OpenFluxVpnService.EXTRA_RESUME, true)
-        ContextCompat.startForegroundService(context, service)
+        runCatching { ContextCompat.startForegroundService(context, service) }
+            .onFailure { android.util.Log.w("PaperFluxRestart", "Android denied background VPN restart", it) }
     }
 }

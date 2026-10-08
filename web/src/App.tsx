@@ -3,8 +3,10 @@ import type { AppExceptionItem, PaperFluxProfile, TabId, VpnSettings } from "./t
 import { DEFAULT_APPS, DEFAULT_SETTINGS } from "./data/defaults";
 import { useVpn } from "./hooks/useVpn";
 import { ToastProvider } from "./hooks/useToast";
+import { loadNetworkSettings, saveNetworkSetting, resetNetworkSettings } from "./utils/networkSettings";
 
 import { BottomNav } from "./components/shell/BottomNav";
+import { AppUpdateDialog } from "./components/shell/AppUpdateDialog";
 
 import { HomeScreen } from "./screens/HomeScreen";
 import { LogsScreen } from "./screens/LogsScreen";
@@ -18,6 +20,7 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<TabId>("home");
 
   const [settings, setSettings] = useState<VpnSettings>(DEFAULT_SETTINGS);
+  const [settingsError, setSettingsError] = useState("");
   const [apps, setApps] = useState<AppExceptionItem[]>(DEFAULT_APPS);
   const appsRef = useRef<AppExceptionItem[]>(DEFAULT_APPS);
   const [profiles, setProfiles] = useState<PaperFluxProfile[]>([]);
@@ -64,11 +67,10 @@ export default function App() {
     } catch { /* preview */ }
   }, []);
   useEffect(() => {
-    const native = (window as unknown as { PaperFluxNative?: { getAutoReconnect?: () => boolean } }).PaperFluxNative;
     try {
-      const autoReconnect = native?.getAutoReconnect?.();
-      if (typeof autoReconnect === "boolean") setSettings((previous) => ({ ...previous, autoReconnect }));
-    } catch { /* preview */ }
+      const saved = loadNetworkSettings();
+      setSettings(previous => ({ ...previous, ...saved, documentUrl: previous.documentUrl }));
+    } catch (error) { setSettingsError(error instanceof Error ? error.message : "Не удалось прочитать настройки"); }
   }, []);
 
   const addProfileFromClipboard = useCallback(() => {
@@ -113,13 +115,16 @@ export default function App() {
   const vpn = useVpn({ autoReconnect: settings.autoReconnect, timeoutSec: settings.connectTimeoutSec });
 
   const updateSetting = useCallback(<K extends keyof VpnSettings,>(key: K, value: VpnSettings[K]) => {
+    if (key !== "documentUrl") {
+      const error = saveNetworkSetting(key, value);
+      if (error) return error;
+      setSettingsError("");
+    }
     setSettings((prev) => ({ ...prev, [key]: value }));
     if (key === "documentUrl") {
       (window as unknown as { PaperFluxNative?: { setDocumentUrl?: (url: string) => void } }).PaperFluxNative?.setDocumentUrl?.(value as string);
     }
-    if (key === "autoReconnect") {
-      (window as unknown as { PaperFluxNative?: { setAutoReconnect?: (enabled: boolean) => void } }).PaperFluxNative?.setAutoReconnect?.(value as boolean);
-    }
+    return "";
   }, []);
 
   const toggleApp = useCallback((id: string, value: boolean): string => {
@@ -133,12 +138,17 @@ export default function App() {
   }, []);
 
   const resetSettings = useCallback(() => {
-    setSettings(DEFAULT_SETTINGS);
-    setApps(DEFAULT_APPS);
-    appsRef.current = DEFAULT_APPS;
-    const native = (window as unknown as { PaperFluxNative?: { setExcludedApps?: (raw: string) => void } }).PaperFluxNative;
-    native?.setExcludedApps?.("[]");
-    (window as unknown as { PaperFluxNative?: { setAutoReconnect?: (enabled: boolean) => void } }).PaperFluxNative?.setAutoReconnect?.(DEFAULT_SETTINGS.autoReconnect);
+    const error = resetNetworkSettings();
+    if (error) return error;
+    setSettings(previous => ({ ...DEFAULT_SETTINGS, documentUrl: previous.documentUrl }));
+    setSettingsError("");
+    const native = (window as unknown as { PaperFluxNative?: { setExcludedApps?: (raw: string) => string } }).PaperFluxNative;
+    const result = native?.setExcludedApps?.("[]") ?? "";
+    if (result.startsWith("Ошибка")) return result;
+    const next = appsRef.current.map(app => ({ ...app, excluded: false }));
+    appsRef.current = next;
+    setApps(next);
+    return "";
   }, []);
 
   const handleToggleConnection = useCallback(() => {
@@ -176,6 +186,7 @@ export default function App() {
             {activeTab === "settings" && (
               <SettingsScreen
                 settings={settings}
+                settingsError={settingsError}
                 onUpdate={updateSetting}
                 apps={apps}
                 onToggleApp={toggleApp}
@@ -184,6 +195,7 @@ export default function App() {
             )}
           </div>
           <BottomNav active={activeTab} onChange={setActiveTab} />
+          <AppUpdateDialog />
         </ToastProvider>
       </div>
     </div>

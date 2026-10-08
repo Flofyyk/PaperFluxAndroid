@@ -1,6 +1,7 @@
 import { Loader2, ShieldAlert, ShieldCheck, ShieldOff } from "lucide-react";
 import { memo } from "react";
-import type { ConnectionStatus } from "../../types";
+import type { ConnectionStatus, PaperFluxProfile } from "../../types";
+import { transportPresentation } from "../../utils/transportPresentation";
 import { Card } from "../ui/Card";
 import { cn } from "../../utils/cn";
 
@@ -10,7 +11,7 @@ const meta: Record<
 > = {
   idle: {
     title: "Туннель отключён",
-    desc: "Трафик идёт напрямую, без шифрования через Yandex Docs.",
+    desc: "VPN отключён. Трафик идёт напрямую.",
     icon: ShieldOff,
     iconBg: "bg-surface-container-high",
     iconColor: "text-on-surface-variant",
@@ -24,7 +25,7 @@ const meta: Record<
   },
   connected: {
     title: "Туннель активен",
-    desc: "Трафик маршрутизируется через Yandex Docs transport.",
+    desc: "Трафик маршрутизируется через защищённый туннель.",
     icon: ShieldCheck,
     iconBg: "bg-success-container",
     iconColor: "text-on-success-container",
@@ -45,8 +46,11 @@ const meta: Record<
   },
 };
 
-export const StatusCard = memo(function StatusCard({ status }: { status: ConnectionStatus }) {
+export const StatusCard = memo(function StatusCard({ status, profile }: { status: ConnectionStatus; profile?: PaperFluxProfile }) {
   const m = meta[status];
+  const description = status === "connected" && profile
+    ? `Трафик маршрутизируется через ${transportPresentation(profile).label}.`
+    : m.desc;
   const Icon = m.icon;
   const spinning = status === "connecting" || status === "reconnecting";
 
@@ -57,7 +61,7 @@ export const StatusCard = memo(function StatusCard({ status }: { status: Connect
       </div>
       <div className="min-w-0">
         <p className="text-[15.5px] font-bold text-on-surface">{m.title}</p>
-        <p className="mt-0.5 text-[13px] leading-snug text-on-surface-variant">{m.desc}</p>
+        <p className="mt-0.5 text-[13px] leading-snug text-on-surface-variant">{description}</p>
       </div>
     </Card>
   );

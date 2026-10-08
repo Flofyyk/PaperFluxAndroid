@@ -51,6 +51,7 @@
 }
 
 .pf-dark {
+  color-scheme: dark;
   --pf-bg: #08070d;
 
   --surface: #131219;
@@ -87,6 +88,14 @@
   --on-error: #690007;
   --error-container: #93000f;
   --on-error-container: #ffdad8;
+}
+
+/* Opaque navigation avoids OEM/WebView compositing artifacts with blur and
+   color-mix alpha backgrounds. Explicit fallback also works on older WebViews. */
+.pf-bottom-nav {
+  background-color: #17161e;
+  background-color: var(--surface-container-low, #17161e);
+  border-top: 1px solid var(--outline-variant, #48454e);
 }
 
 @theme inline {

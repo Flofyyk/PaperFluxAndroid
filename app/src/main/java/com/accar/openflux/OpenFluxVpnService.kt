@@ -97,6 +97,15 @@ class OpenFluxVpnService : VpnService() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        return try { handleStartCommand(intent, startId) } catch (error: Exception) {
+            Log.e("OpenFluxVpn", "VPN command failed", error)
+            runCatching { publish("ERROR", "Не удалось запустить VPN. Повторите попытку из приложения") }
+            runCatching { stopTunnel(announce = false) }
+            START_NOT_STICKY
+        }
+    }
+
+    private fun handleStartCommand(intent: Intent?, startId: Int): Int {
         if (intent?.action == STOP) { stopTunnel(); return START_NOT_STICKY }
         if (intent?.action == UPDATE_APP_ROUTING) {
             if (!wantsConnection()) {
@@ -246,15 +255,14 @@ class OpenFluxVpnService : VpnService() {
             check(binary.exists()) { "Нативное ядро OpenFlux не найдено" }
             // Establish the VPN first, with this app excluded, so every
             // OpenFlux transport socket is born on the underlying network.
-            val builder = Builder().setSession("PaperFlux").setMtu(1400)
+            val networkSettings = NetworkSettingsStore(this).read()
+            val builder = Builder().setSession("PaperFlux").setMtu(networkSettings.mtu)
                 .addAddress(clientIp, 24)
                 .addDisallowedApplication(packageName)
-                // Use Yandex DNS on the TUN as well as in the native
-                // bootstrap resolver.  1.1.1.1 is filtered on some mobile
-                // operators and made Android report that the Internet was
-                // unavailable even when LTE was working.
-                .addDnsServer("77.88.8.8")
-                .addDnsServer("77.88.8.1")
+                // User DNS applies to apps inside the tunnel; bootstrap DNS
+                // for the excluded transport remains on the physical network.
+                .addDnsServer(networkSettings.dnsPrimary)
+                .addDnsServer(networkSettings.dnsSecondary)
                 .addRoute("0.0.0.0", 0)
             val excludedApps = AppRoutingStore(this).read()
             var excludedCount = 0
@@ -266,7 +274,7 @@ class OpenFluxVpnService : VpnService() {
                     Log.i("OpenFluxVpn", "Excluded application was uninstalled: $packageName")
                 }
             }
-            val configuration = clientIp + "|" + excludedApps.joinToString(",")
+            val configuration = networkSettings.tunnelKey(clientIp, excludedApps)
             if (!current()) return
             if (tun == null || tunConfiguration != configuration) {
                 val replacement = builder.establish() ?: error("Не удалось создать Android TUN")
@@ -761,7 +769,8 @@ class OpenFluxVpnService : VpnService() {
     }
     private fun preferences() = getSharedPreferences(PREFS, Context.MODE_PRIVATE)
     private fun wantsConnection() = preferences().getBoolean(DESIRED_ACTIVE, false)
-    private fun autoReconnectEnabled() = preferences().getBoolean(AUTO_RECONNECT, true)
+    private fun autoReconnectEnabled() = runCatching { NetworkSettingsStore(this).read().autoReconnect }
+        .getOrElse { preferences().getBoolean(AUTO_RECONNECT, true) }
     private fun scheduleAppRoutingUpdate() {
         val generation = appRoutingGeneration.incrementAndGet()
         appRoutingFuture?.cancel(false)

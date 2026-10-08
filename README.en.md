@@ -18,7 +18,7 @@
 
 PaperFlux Android connects applications to a PaperFlux server through an encrypted document transport. A configured server and an access profile are required.
 
-The [0.4.27 release](https://github.com/Flofyyk/PaperFluxAndroid/releases/tag/v0.4.27) includes core `0.5.16`, fixing Mail.ru document-history acknowledgements and recovery after editor rejection. Mail.ru failure reasons now appear in the event journal. Yandex fixes, disabled RACK/TLP, private-data redaction, card layout, verification and retained server flags remain in place.
+The [0.4.28 release](https://github.com/Flofyyk/PaperFluxAndroid/releases/tag/v0.4.28) fixes DNS and network-settings persistence, adds a VPN quick-settings tile and GitHub update checks, improves VPN startup error handling, and updates transport labels and bottom navigation. It includes core `0.5.16` with Mail.ru connection and document-channel recovery fixes.
 
 Use a dedicated empty document for Mail.ru: editable links receive periodic editor changes. Read-only links are accepted without those changes; connectivity still depends on the document service.
 
@@ -32,6 +32,8 @@ Use a dedicated empty document for Mail.ru: editable links receive periodic edit
 - Automatic reconnection and support for backup VPS configuration sets.
 - Traffic statistics, connection latency and an event journal.
 - VPN status notification with a disconnect action.
+- Quick-settings tile to connect or disconnect the selected profile.
+- GitHub update checks, APK downloads and a persistent 24-hour reminder skip.
 - Encrypted storage for profile keys.
 
 ## Requirements
@@ -91,6 +93,14 @@ Backup sets contain separate configurations for already deployed servers. Switch
 Select applications under Settings → App exclusions. The list is persisted and applied automatically with a brief VPN reconnect. Restart an excluded app if it retains existing connections.
 
 Exclusions route traffic outside the tunnel but do not hide the system-wide presence of a VPN.
+
+## Settings and updates
+
+DNS and MTU persist across app restarts and apply on the next VPN connection. The document transport's bootstrap DNS remains separate from the DNS used by apps inside the tunnel.
+
+Add the tile from Settings, or manually through the quick-settings editor on Android 8–12.
+
+The app checks stable GitHub releases when opened. Choose Update to download the APK, or Skip to postpone the reminder for 24 hours. The APK is verified before installation; Android asks for installation confirmation. A manual check is available in Settings. GitHub must be reachable to check and download updates.
 
 ## Build
 

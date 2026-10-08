@@ -53,6 +53,13 @@ import java.security.SecureRandom
 class MainActivity : AppCompatActivity() {
     private var authAutoOpen = YandexAuthAutoOpenPolicy()
     private var mainResumed = false
+    private var webReady = false
+    private var autoConnectChecked = false
+    private var appUpdates: GitHubAppUpdater? = null
+    private val installPermission = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
+        if (packageManager.canRequestPackageInstalls()) appUpdates?.install()
+        else android.widget.Toast.makeText(this, "Для обновления разрешите установку из PaperFlux", android.widget.Toast.LENGTH_LONG).show()
+    }
     private var authLaunching = false
     @Volatile private var profileLoader: ProfileBootstrapClient? = null
     private val profileDiagnosticsExecutor = java.util.concurrent.Executors.newSingleThreadExecutor()
@@ -144,9 +151,15 @@ class MainActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        appUpdates = GitHubAppUpdater(this) { raw -> runOnUiThread {
+            if (!isDestroyed && !isFinishing) designWeb?.evaluateJavascript(
+                "window.__paperFluxOnAppUpdate&&window.__paperFluxOnAppUpdate(${org.json.JSONObject.quote(raw)})", null)
+        } }
         authAutoOpen = YandexAuthAutoOpenPolicy(savedInstanceState?.getStringArrayList("opened-auth-requests").orEmpty(),
             savedInstanceState?.getStringArrayList("opened-auth-scopes").orEmpty())
         WindowCompat.setDecorFitsSystemWindows(window, false)
+        WindowCompat.getInsetsController(window, window.decorView).isAppearanceLightNavigationBars = false
+        if (Build.VERSION.SDK_INT >= 29) window.decorView.isForceDarkAllowed = false
         // App labels are cheap; icons are requested lazily by the WebView.
         Thread {
             runCatching {
@@ -167,6 +180,7 @@ class MainActivity : AppCompatActivity() {
         mainResumed = true
         authLaunching = false
         maybeOpenYandexCheck()
+        maybeAutoConnect()
     }
     override fun onPause() {
         mainResumed = false
@@ -208,6 +222,7 @@ class MainActivity : AppCompatActivity() {
     }
     override fun onStop() { runCatching { unregisterReceiver(stateReceiver) }; super.onStop() }
     override fun onDestroy() {
+        appUpdates?.close()
         cancelProfileRequest()
         profileDiagnosticsExecutor.shutdownNow()
         designWeb?.removeJavascriptInterface("PaperFluxNative")
@@ -250,6 +265,12 @@ class MainActivity : AppCompatActivity() {
     private fun buildWebUi() {
         val web = WebView(this).apply {
             setLayerType(View.LAYER_TYPE_HARDWARE, null)
+            // The bundled UI already supplies its own dark palette. OEM or
+            // WebView algorithmic inversion must not recolor individual panels.
+            if (Build.VERSION.SDK_INT >= 29) isForceDarkAllowed = false
+            if (androidx.webkit.WebViewFeature.isFeatureSupported(androidx.webkit.WebViewFeature.ALGORITHMIC_DARKENING)) {
+                androidx.webkit.WebSettingsCompat.setAlgorithmicDarkeningAllowed(settings, false)
+            }
             settings.javaScriptEnabled = true
             settings.domStorageEnabled = true
             settings.allowFileAccess = true
@@ -268,6 +289,8 @@ class MainActivity : AppCompatActivity() {
                     // the UI cannot remain stuck on the connecting spinner.
                     val snapshot = org.json.JSONObject(PaperFluxBridge().getState())
                     view.post { sendWebState(snapshot.optString("state", "DISCONNECTED"), snapshot.optString("detail"), duration = snapshot.optLong("durationSec", -1L), rx = snapshot.optLong("rxBytes", -1L), tx = snapshot.optLong("txBytes", -1L), ping = snapshot.optLong("ping", -1L)) }
+                    webReady = true
+                    maybeAutoConnect()
                 }
                 override fun shouldOverrideUrlLoading(view: WebView, request: android.webkit.WebResourceRequest): Boolean =
                     request.url.toString() != "file:///android_asset/paperflux/index.html"
@@ -374,12 +397,24 @@ class MainActivity : AppCompatActivity() {
         }
         @JavascriptInterface fun disconnect() = runOnUiThread { startService(Intent(this@MainActivity, OpenFluxVpnService::class.java).setAction(OpenFluxVpnService.STOP)) }
         @JavascriptInterface fun setAutoReconnect(enabled: Boolean) {
-            getSharedPreferences(OpenFluxVpnService.PREFS, MODE_PRIVATE).edit().putBoolean(OpenFluxVpnService.AUTO_RECONNECT, enabled).apply()
-            startService(Intent(this@MainActivity, OpenFluxVpnService::class.java)
-                .setAction(OpenFluxVpnService.UPDATE_SETTINGS).putExtra(OpenFluxVpnService.EXTRA_AUTO_RECONNECT, enabled))
+            NetworkSettingsStore(this@MainActivity).update("autoReconnect", enabled.toString())
+            notifyAutoReconnect(enabled)
         }
-        @JavascriptInterface fun getAutoReconnect(): Boolean = getSharedPreferences(OpenFluxVpnService.PREFS, MODE_PRIVATE)
-            .getBoolean(OpenFluxVpnService.AUTO_RECONNECT, true)
+        @JavascriptInterface fun getAutoReconnect(): Boolean = NetworkSettingsStore(this@MainActivity).read().autoReconnect
+        @JavascriptInterface fun getNetworkSettings(): String = try {
+            NetworkSettingsStore.json(NetworkSettingsStore(this@MainActivity).read()).toString()
+        } catch (_: Exception) { org.json.JSONObject().put("error", "Не удалось прочитать настройки сети").toString() }
+        @JavascriptInterface fun setNetworkSetting(key: String, value: String): String = try {
+            val settings = NetworkSettingsStore(this@MainActivity).update(key, value)
+            if (key == "autoReconnect") notifyAutoReconnect(settings.autoReconnect)
+            ""
+        } catch (error: IllegalArgumentException) { "Ошибка: ${error.message}" }
+        catch (_: Exception) { "Ошибка: не удалось сохранить настройку" }
+        @JavascriptInterface fun resetNetworkSettings(): String = try {
+            val settings = NetworkSettingsStore(this@MainActivity).reset()
+            notifyAutoReconnect(settings.autoReconnect)
+            ""
+        } catch (_: Exception) { "Ошибка: не удалось сбросить настройки сети" }
         @JavascriptInterface fun getDocumentUrl(): String = getSharedPreferences(OpenFluxVpnService.PREFS, MODE_PRIVATE).getString("document", "") ?: ""
         @JavascriptInterface fun setDocumentUrl(value: String) {
             getSharedPreferences(OpenFluxVpnService.PREFS, MODE_PRIVATE).edit().putString("document", value.trim()).apply()
@@ -440,6 +475,34 @@ class MainActivity : AppCompatActivity() {
             }
         } catch (e: Exception) { "Ошибка профиля: ${e.message ?: "проверьте поля"}" }
         @JavascriptInterface fun getState(): String = TunnelSnapshot.read(this@MainActivity).toString()
+        @JavascriptInterface fun getAppUpdateState(): String = appUpdates?.snapshot() ?: "{}"
+        @JavascriptInterface fun checkAppUpdates(manual: Boolean) { appUpdates?.check(manual) }
+        @JavascriptInterface fun downloadAppUpdate() { appUpdates?.download() }
+        @JavascriptInterface fun skipAppUpdate(): String = appUpdates?.snooze() ?: "Не удалось сохранить пропуск"
+        @JavascriptInterface fun installAppUpdate() = runOnUiThread {
+            if (packageManager.canRequestPackageInstalls()) appUpdates?.install()
+            else runCatching { installPermission.launch(Intent(android.provider.Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+                Uri.parse("package:$packageName"))) }.onFailure {
+                android.widget.Toast.makeText(this@MainActivity, "Откройте настройки Android и разрешите установку из PaperFlux", android.widget.Toast.LENGTH_LONG).show()
+            }
+        }
+        @JavascriptInterface fun addQuickSettingsTile() = runOnUiThread {
+            if (Build.VERSION.SDK_INT >= 33) {
+                runCatching {
+                    getSystemService(android.app.StatusBarManager::class.java).requestAddTileService(
+                        android.content.ComponentName(this@MainActivity, PaperFluxTileService::class.java), "PaperFlux",
+                        android.graphics.drawable.Icon.createWithResource(this@MainActivity, R.drawable.ic_paperflux_notification), mainExecutor
+                    ) { result ->
+                        val message = when (result) {
+                            android.app.StatusBarManager.TILE_ADD_REQUEST_RESULT_TILE_ADDED,
+                            android.app.StatusBarManager.TILE_ADD_REQUEST_RESULT_TILE_ALREADY_ADDED -> "Плитка PaperFlux добавлена в шторку"
+                            else -> "Добавьте PaperFlux через редактирование плиток в шторке"
+                        }
+                        android.widget.Toast.makeText(this@MainActivity, message, android.widget.Toast.LENGTH_LONG).show()
+                    }
+                }.onFailure { android.widget.Toast.makeText(this@MainActivity, "Добавьте PaperFlux через редактирование плиток в шторке", android.widget.Toast.LENGTH_LONG).show() }
+            } else android.widget.Toast.makeText(this@MainActivity, "Откройте шторку → редактирование плиток → PaperFlux", android.widget.Toast.LENGTH_LONG).show()
+        }
         @JavascriptInterface fun getSessionLogs(): String = SessionJournal.read(this@MainActivity)
         @JavascriptInterface fun clearSessionLogs() { SessionJournal.clear(this@MainActivity) }
         @JavascriptInterface fun getInstalledApps(): String {
@@ -459,10 +522,28 @@ class MainActivity : AppCompatActivity() {
     private fun saveAppExclusions(values: Set<String>): String = try {
         AppRoutingStore(this).save(values)
         runOnUiThread {
-            startService(Intent(this, OpenFluxVpnService::class.java).setAction(OpenFluxVpnService.UPDATE_APP_ROUTING))
+            // An idle VPN needs no service. Starting it just to save switches
+            // races with a following START/stopSelf and background restrictions.
+            if (vpnProcessAlive()) runCatching {
+                startService(Intent(this, OpenFluxVpnService::class.java).setAction(OpenFluxVpnService.UPDATE_APP_ROUTING))
+            }.onFailure { sendWebState(null, event = "Исключения сохранены. Применятся при следующем подключении") }
         }
         "Исключения сохранены"
     } catch (error: Exception) { "Ошибка: не удалось сохранить исключения" }
+
+    private fun vpnProcessAlive(): Boolean = getSystemService(android.app.ActivityManager::class.java)
+        .runningAppProcesses?.any { it.processName == "$packageName:vpn" } == true
+
+    private fun notifyAutoReconnect(enabled: Boolean) {
+        // Do not write cached Activity preferences over the VPN process's
+        // desired-active/session state. The atomic store is authoritative.
+        runOnUiThread {
+            if (vpnProcessAlive()) runCatching {
+                startService(Intent(this, OpenFluxVpnService::class.java).setAction(OpenFluxVpnService.UPDATE_SETTINGS)
+                    .putExtra(OpenFluxVpnService.EXTRA_AUTO_RECONNECT, enabled))
+            }
+        }
+    }
 
     private fun installedAppsJson(includeIcons: Boolean): String {
         val excluded = AppRoutingStore(this).read()
@@ -691,13 +772,18 @@ class MainActivity : AppCompatActivity() {
         }
         // A session journal must describe only the current connection attempt.
         // Do not replay a refused/timeout event from a previous VPN session.
-        getSharedPreferences(OpenFluxVpnService.PREFS, MODE_PRIVATE).edit()
-            .remove("last_event")
-            .putString("state", "CONNECTING")
-            .putString("detail", "Запускаем новую сессию")
-            .apply()
+        // The VPN process begins the journal and writes its own lifecycle
+        // preferences. Activity must not overwrite that cross-process file.
         val request = VpnService.prepare(this)
         if (request == null) requestNotificationThenStart() else permission.launch(request)
+    }
+    private fun maybeAutoConnect() {
+        if (!mainResumed || !webReady || autoConnectChecked) return
+        autoConnectChecked = true
+        // Explicit opt-in, at most once per Activity; never replace a live VPN.
+        if (runCatching { NetworkSettingsStore(this).read().autoConnect }.getOrDefault(false) && !vpnProcessAlive()) {
+            requestConnect()
+        }
     }
     private fun requestNotificationThenStart() {
         if (Build.VERSION.SDK_INT >= 33 &&
@@ -707,7 +793,12 @@ class MainActivity : AppCompatActivity() {
     }
     private fun startOpenFlux() {
         if (::connectButton.isInitialized) renderState("CONNECTING", "Запрашиваем разрешение и запускаем туннель")
-        startForegroundService(Intent(this, OpenFluxVpnService::class.java).setAction(OpenFluxVpnService.START))
+        runCatching {
+            startForegroundService(Intent(this, OpenFluxVpnService::class.java).setAction(OpenFluxVpnService.START))
+        }.onFailure {
+            sendWebState("ERROR", "Android не разрешил запуск VPN. Откройте приложение и повторите попытку")
+            android.util.Log.e("PaperFluxStart", "VPN service launch failed", it)
+        }
     }
     private fun renderState(state: String, detail: String) {
         currentState = state

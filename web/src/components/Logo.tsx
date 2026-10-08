@@ -19,13 +19,13 @@ export function LogoMark({ className }: { className?: string }) {
   );
 }
 
-export function LogoWordmark({ className }: { className?: string }) {
+export function LogoWordmark({ className, subtitle = "Документный VPN" }: { className?: string; subtitle?: string }) {
   return (
     <div className={cn("flex items-center gap-2.5", className)}>
       <LogoMark className="h-9 w-9 drop-shadow-sm" />
       <div className="flex flex-col leading-none">
         <span className="text-[16.5px] font-extrabold tracking-tight text-on-surface">PaperFlux</span>
-        <span className="text-[10.5px] font-medium tracking-wide text-on-surface-variant">Yandex Docs transport</span>
+        <span className="text-[10.5px] font-medium tracking-wide text-on-surface-variant">{subtitle}</span>
       </div>
     </div>
   );

@@ -13,16 +13,18 @@ const APP_ROW_OVERSCAN = 5;
 
 export const SettingsScreen = memo(function SettingsScreen({
   settings,
+  settingsError,
   onUpdate,
   apps,
   onToggleApp,
   onReset,
 }: {
   settings: VpnSettings;
-  onUpdate: <K extends keyof VpnSettings>(key: K, value: VpnSettings[K]) => void;
+  settingsError?: string;
+  onUpdate: <K extends keyof VpnSettings>(key: K, value: VpnSettings[K]) => string;
   apps: AppExceptionItem[];
   onToggleApp: (id: string, value: boolean) => string;
-  onReset: () => void;
+  onReset: () => string;
 }) {
   const { show } = useToast();
   const [appQuery, setAppQuery] = useState("");
@@ -40,20 +42,26 @@ export const SettingsScreen = memo(function SettingsScreen({
   const firstApp = Math.max(0, Math.floor(appScrollTop / APP_ROW_HEIGHT) - APP_ROW_OVERSCAN);
   const lastApp = Math.min(visibleApps.length, firstApp + Math.ceil(288 / APP_ROW_HEIGHT) + APP_ROW_OVERSCAN * 2);
   const renderedApps = visibleApps.slice(firstApp, lastApp);
+  const update = <K extends keyof VpnSettings,>(key: K, value: VpnSettings[K]) => {
+    const error = onUpdate(key, value);
+    if (error) show(error);
+  };
 
   return (
     <div className="h-full overflow-y-auto">
       <ScreenHeader title="Настройки" subtitle="Транспорт, сеть и поведение приложения" />
 
       <div className="flex flex-col gap-3.5 px-5 pb-8">
+        {settingsError && <p role="alert" className="text-error">{settingsError}</p>}
         <SettingsSection title="Сеть">
+          <p className="py-2 text-[12px] text-on-surface-variant">DNS и MTU сохраняются сразу и применяются после переподключения VPN.</p>
           <SettingRow
             icon={<Wifi className="h-4.5 w-4.5" strokeWidth={2} />}
             title="Основной DNS"
             supporting="Используется для резолвинга внутри туннеля"
             trailing={
               <div className="w-[108px]">
-                <InlineTextField value={settings.dnsPrimary} onChange={(v) => onUpdate("dnsPrimary", v)} />
+                <InlineTextField value={settings.dnsPrimary} onChange={(v) => onUpdate("dnsPrimary", v)} onError={show} />
               </div>
             }
             className="items-start"
@@ -64,7 +72,7 @@ export const SettingsScreen = memo(function SettingsScreen({
             supporting="Применяется при недоступности основного сервера"
             trailing={
               <div className="w-[108px]">
-                <InlineTextField value={settings.dnsSecondary} onChange={(v) => onUpdate("dnsSecondary", v)} />
+                <InlineTextField value={settings.dnsSecondary} onChange={(v) => onUpdate("dnsSecondary", v)} onError={show} />
               </div>
             }
             className="items-start"
@@ -73,7 +81,7 @@ export const SettingsScreen = memo(function SettingsScreen({
             icon={<RefreshCw className="h-4.5 w-4.5" strokeWidth={2} />}
             title="MTU"
             supporting="Максимальный размер пакета для VPN-интерфейса"
-            trailing={<InlineNumberField value={settings.mtu} min={576} max={1500} suffix="Б" onChange={(v) => onUpdate("mtu", v)} />}
+            trailing={<InlineNumberField value={settings.mtu} min={576} max={1500} suffix="Б" onChange={(v) => update("mtu", v)} />}
           />
           <SettingRow
             icon={<Timer className="h-4.5 w-4.5" strokeWidth={2} />}
@@ -85,20 +93,32 @@ export const SettingsScreen = memo(function SettingsScreen({
                 min={5}
                 max={120}
                 suffix="сек"
-                onChange={(v) => onUpdate("connectTimeoutSec", v)}
+                onChange={(v) => update("connectTimeoutSec", v)}
               />
             }
           />
         </SettingsSection>
 
         <SettingsSection title="Поведение">
+          <button type="button" onClick={() => {
+            const native = (window as Window & { PaperFluxNative?: { checkAppUpdates?: (manual: boolean) => void } }).PaperFluxNative;
+            if (native?.checkAppUpdates) { native.checkAppUpdates(true); show("Проверяем GitHub…"); }
+            else show("Проверка обновлений доступна в Android-приложении");
+          }} className="w-full py-3 text-left text-[13.5px] font-semibold text-primary">Проверить обновление</button>
+          <button type="button" onClick={() => {
+            const native = (window as Window & { PaperFluxNative?: { addQuickSettingsTile?: () => void } }).PaperFluxNative;
+            if (native?.addQuickSettingsTile) native.addQuickSettingsTile();
+            else show("Откройте шторку → редактирование плиток → PaperFlux");
+          }} className="w-full py-3 text-left text-[13.5px] font-semibold text-primary">
+            Добавить плитку VPN в шторку
+          </button>
           <SettingRow
             title="Автоматическое переподключение"
             supporting="Восстанавливать туннель при обрыве без участия пользователя"
             trailing={
               <Switch
                 checked={settings.autoReconnect}
-                onChange={(v) => onUpdate("autoReconnect", v)}
+                onChange={(v) => update("autoReconnect", v)}
                 aria-label="Автоматическое переподключение"
               />
             }
@@ -109,7 +129,7 @@ export const SettingsScreen = memo(function SettingsScreen({
             trailing={
               <Switch
                 checked={settings.autoConnect}
-                onChange={(v) => onUpdate("autoConnect", v)}
+                onChange={(v) => update("autoConnect", v)}
                 aria-label="Подключаться автоматически"
               />
             }
@@ -137,8 +157,8 @@ export const SettingsScreen = memo(function SettingsScreen({
 
         <button
           onClick={() => {
-            onReset();
-            show("Настройки сброшены");
+            const error = onReset();
+            show(error || "Настройки сброшены");
           }}
           className="mt-1 flex items-center justify-center gap-2 rounded-full border border-error/50 py-3.5 text-[13px] font-bold text-error transition-colors active:bg-error-container/40"
         >

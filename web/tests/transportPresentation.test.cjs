@@ -1,0 +1,62 @@
+const { test } = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const vm = require('node:vm');
+const ts = require('typescript');
+const React = require('react');
+const { renderToStaticMarkup } = require('react-dom/server');
+const cache = new Map();
+function load(file) {
+  file = path.resolve(__dirname, file);
+  if (cache.has(file)) return cache.get(file);
+  const module = { exports: {} };
+  cache.set(file, module.exports);
+  const code = ts.transpileModule(fs.readFileSync(file, 'utf8'), {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX },
+  }).outputText;
+  vm.runInNewContext(code, { module, exports: module.exports, require: name => {
+    if (!name.startsWith('.')) return require(name);
+    const target = path.resolve(path.dirname(file), name);
+    return load(fs.existsSync(`${target}.tsx`) ? `${target}.tsx` : `${target}.ts`);
+  }});
+  return module.exports;
+}
+const { transportPresentation, transportStages } = load('../src/utils/transportPresentation.ts');
+const { HomeTopBar } = load('../src/components/home/HomeTopBar.tsx');
+const { StatusHint } = load('../src/components/home/StatusHint.tsx');
+const { StatusCard } = load('../src/components/home/StatusCard.tsx');
+const { StageList } = load('../src/components/home/StageList.tsx');
+const render = (component, props) => renderToStaticMarkup(React.createElement(component, props));
+const profile = transport => ({ id: 'test', name: 'Test', server: 'test', documentUrl: 'test', transport });
+
+test('Mail.ru labels are consistent in header, connection card and stages', () => {
+  const selected = profile('mailru');
+  const stages = [{ id: 'transport', title: 'Yandex transport', description: 'Yandex Docs', status: 'running' }];
+  const html = render(HomeTopBar, { profile: selected }) + render(StatusCard, { profile: selected, status: 'connected' })
+    + render(StageList, { stages: transportStages(stages, selected) });
+  assert.match(html, /MAIL.RU/);
+  assert.match(html, /Mail.ru Документы/);
+  assert.doesNotMatch(html, /Yandex|YANDEX|Яндекс|Engine.IO/);
+  assert.equal(stages[0].title, 'Yandex transport');
+  assert.equal(transportStages(stages, selected)[0].status, 'running');
+});
+
+test('Yandex, Volga, legacy, Cups and missing profile have appropriate labels', () => {
+  for (const provider of ['yandex', 'vyandex', undefined]) {
+    assert.equal(transportPresentation(profile(provider)).badge, 'YANDEX');
+    assert.match(render(HomeTopBar, { profile: profile(provider) }), /Яндекс Документы/);
+  }
+  assert.equal(transportPresentation(profile('cupsonline')).badge, 'CUPS.ONLINE');
+  const neutral = render(HomeTopBar, {});
+  assert.match(neutral, /VPN/);
+  assert.doesNotMatch(neutral, /YANDEX|MAIL.RU/);
+});
+
+test('idle hint no longer renders the technical subtitle', () => {
+  const html = render(StatusHint, { status: 'idle' });
+  assert.match(html, /Нажмите для подключения/);
+  assert.equal((html.match(/<span/g) ?? []).length, 1);
+  assert.doesNotMatch(html, /Engine.IO|transport/);
+  assert.doesNotMatch(render(StatusCard, { status: 'idle', profile: profile('mailru') }), /Yandex|Яндекс/);
+});

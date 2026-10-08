@@ -9,6 +9,7 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE"/>
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES"/>
     <queries>
         <intent>
             <action android:name="android.intent.action.MAIN"/>
@@ -19,6 +20,11 @@
         <activity android:name=".YandexAuthActivity" android:exported="false" android:process=":auth" />
         <activity android:name=".QrScanActivity" android:exported="false" />
         <activity android:name=".ProfileShareActivity" android:exported="false" />
+        <activity android:name=".VpnTilePermissionActivity" android:exported="false" android:excludeFromRecents="true" />
+        <service android:name=".PaperFluxTileService" android:label="PaperFlux" android:icon="@drawable/ic_paperflux_notification"
+            android:exported="true" android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter><action android:name="android.service.quicksettings.action.QS_TILE" /></intent-filter>
+        </service>
         <provider android:name="androidx.core.content.FileProvider" android:authorities="${applicationId}.profile-files" android:exported="false" android:grantUriPermissions="true">
             <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/profile_file_paths" />
         </provider>

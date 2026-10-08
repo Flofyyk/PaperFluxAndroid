@@ -9,6 +9,7 @@ import { StatsGrid } from "../components/home/StatsGrid";
 import { ActiveProfileCard } from "../components/home/ActiveProfileCard";
 import { VerificationCard } from "../components/home/VerificationCard";
 import type { VerificationState } from "../utils/verification";
+import { transportStages } from "../utils/transportPresentation";
 
 export function HomeScreen({
   status,
@@ -37,7 +38,7 @@ export function HomeScreen({
 
   return (
     <div className="flex h-full flex-col">
-      <HomeTopBar />
+      <HomeTopBar profile={profile} />
 
       <div className="@container flex-1 overflow-y-auto">
         <div className="flex flex-col items-center gap-3 px-5 pb-6 pt-4">
@@ -50,7 +51,7 @@ export function HomeScreen({
 
         <div className="flex flex-col gap-3.5 px-5 pb-8 @[420px]:gap-4 @[420px]:px-6">
           <div>
-            <StatusCard status={status} />
+            <StatusCard status={status} profile={profile} />
           </div>
 
           {(status === "error" || status === "reconnecting") && errorReason && (
@@ -62,7 +63,7 @@ export function HomeScreen({
             </div>
           )}
 
-          <StageList stages={stages} />
+          <StageList stages={transportStages(stages, profile)} />
         </div>
       </div>
 
