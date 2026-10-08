@@ -1,7 +1,7 @@
 {
-  "version": "0.5.14-mailru.1",
+  "version": "0.5.15",
   "repository": "https://github.com/Flofyyk/PaperFlux",
-  "commit": "fd6bc15bf0db9d90b0000a75846de660a0596351",
+  "commit": "52c935b4cc8f6eb4bd9c45fd0fb2ce78e1514163",
   "mailruUpstreamCommit": "74cac6d47bf4c27947348ee957538a2c0728a485",
   "localAdaptation": true
 }
