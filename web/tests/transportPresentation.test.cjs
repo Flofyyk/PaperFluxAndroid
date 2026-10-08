@@ -60,3 +60,21 @@ test('idle hint no longer renders the technical subtitle', () => {
   assert.doesNotMatch(html, /Engine.IO|transport/);
   assert.doesNotMatch(render(StatusCard, { status: 'idle', profile: profile('mailru') }), /Yandex|Яндекс/);
 });
+
+test('settings omit the tile-add button while the system tile remains registered', () => {
+  const { SettingsScreen } = load('../src/screens/SettingsScreen.tsx');
+  const { ToastProvider } = load('../src/hooks/useToast.tsx');
+  const screen = React.createElement(SettingsScreen, {
+    settings: { dnsPrimary: '77.88.8.8', dnsSecondary: '77.88.8.1', mtu: 1400, connectTimeoutSec: 15, autoReconnect: true, autoConnect: false },
+    apps: [], onUpdate: () => '', onToggleApp: () => '', onReset: () => '',
+  });
+  const html = renderToStaticMarkup(React.createElement(ToastProvider, null, screen));
+  assert.doesNotMatch(html, /Добавить плитку VPN|addQuickSettingsTile/);
+  assert.match(html, /Проверить обновление/);
+  const manifest = fs.readFileSync(path.resolve(__dirname, '../../app/src/main/AndroidManifest.xml'), 'utf8');
+  assert.match(manifest, /android:name="\.PaperFluxTileService"/);
+  assert.match(manifest, /android.permission.BIND_QUICK_SETTINGS_TILE/);
+  assert.match(manifest, /android.service.quicksettings.action.QS_TILE/);
+  const activity = fs.readFileSync(path.resolve(__dirname, '../../app/src/main/java/com/accar/openflux/MainActivity.kt'), 'utf8');
+  assert.doesNotMatch(activity, /addQuickSettingsTile|requestAddTileService/);
+});

@@ -486,23 +486,6 @@ class MainActivity : AppCompatActivity() {
                 android.widget.Toast.makeText(this@MainActivity, "Откройте настройки Android и разрешите установку из PaperFlux", android.widget.Toast.LENGTH_LONG).show()
             }
         }
-        @JavascriptInterface fun addQuickSettingsTile() = runOnUiThread {
-            if (Build.VERSION.SDK_INT >= 33) {
-                runCatching {
-                    getSystemService(android.app.StatusBarManager::class.java).requestAddTileService(
-                        android.content.ComponentName(this@MainActivity, PaperFluxTileService::class.java), "PaperFlux",
-                        android.graphics.drawable.Icon.createWithResource(this@MainActivity, R.drawable.ic_paperflux_notification), mainExecutor
-                    ) { result ->
-                        val message = when (result) {
-                            android.app.StatusBarManager.TILE_ADD_REQUEST_RESULT_TILE_ADDED,
-                            android.app.StatusBarManager.TILE_ADD_REQUEST_RESULT_TILE_ALREADY_ADDED -> "Плитка PaperFlux добавлена в шторку"
-                            else -> "Добавьте PaperFlux через редактирование плиток в шторке"
-                        }
-                        android.widget.Toast.makeText(this@MainActivity, message, android.widget.Toast.LENGTH_LONG).show()
-                    }
-                }.onFailure { android.widget.Toast.makeText(this@MainActivity, "Добавьте PaperFlux через редактирование плиток в шторке", android.widget.Toast.LENGTH_LONG).show() }
-            } else android.widget.Toast.makeText(this@MainActivity, "Откройте шторку → редактирование плиток → PaperFlux", android.widget.Toast.LENGTH_LONG).show()
-        }
         @JavascriptInterface fun getSessionLogs(): String = SessionJournal.read(this@MainActivity)
         @JavascriptInterface fun clearSessionLogs() { SessionJournal.clear(this@MainActivity) }
         @JavascriptInterface fun getInstalledApps(): String {

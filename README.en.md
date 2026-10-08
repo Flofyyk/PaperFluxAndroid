@@ -98,7 +98,7 @@ Exclusions route traffic outside the tunnel but do not hide the system-wide pres
 
 DNS and MTU persist across app restarts and apply on the next VPN connection. The document transport's bootstrap DNS remains separate from the DNS used by apps inside the tunnel.
 
-Add the tile from Settings, or manually through the quick-settings editor on Android 8–12.
+The PaperFlux tile is available in the system quick-settings editor. Move it to your active tiles manually; there is no separate in-app add button.
 
 The app checks stable GitHub releases when opened. Choose Update to download the APK, or Skip to postpone the reminder for 24 hours. The APK is verified before installation; Android asks for installation confirmation. A manual check is available in Settings. GitHub must be reachable to check and download updates.
 

@@ -105,13 +105,6 @@ export const SettingsScreen = memo(function SettingsScreen({
             if (native?.checkAppUpdates) { native.checkAppUpdates(true); show("Проверяем GitHub…"); }
             else show("Проверка обновлений доступна в Android-приложении");
           }} className="w-full py-3 text-left text-[13.5px] font-semibold text-primary">Проверить обновление</button>
-          <button type="button" onClick={() => {
-            const native = (window as Window & { PaperFluxNative?: { addQuickSettingsTile?: () => void } }).PaperFluxNative;
-            if (native?.addQuickSettingsTile) native.addQuickSettingsTile();
-            else show("Откройте шторку → редактирование плиток → PaperFlux");
-          }} className="w-full py-3 text-left text-[13.5px] font-semibold text-primary">
-            Добавить плитку VPN в шторку
-          </button>
           <SettingRow
             title="Автоматическое переподключение"
             supporting="Восстанавливать туннель при обрыве без участия пользователя"
