@@ -1,7 +1,7 @@
 {
-  "version": "0.5.15",
+  "version": "0.5.16",
   "repository": "https://github.com/Flofyyk/PaperFlux",
-  "commit": "52c935b4cc8f6eb4bd9c45fd0fb2ce78e1514163",
+  "commit": "04a46e25835274ec62ce6052e80f8ff0f5cef1f5",
   "mailruUpstreamCommit": "74cac6d47bf4c27947348ee957538a2c0728a485",
   "localAdaptation": true
 }

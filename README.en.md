@@ -18,7 +18,7 @@
 
 PaperFlux Android connects applications to a PaperFlux server through an encrypted document transport. A configured server and an access profile are required.
 
-The [0.4.26 release](https://github.com/Flofyyk/PaperFluxAndroid/releases/tag/v0.4.26) includes core `0.5.15`, fixing large Yandex authentication responses and recovery after editor rejection. Yandex session activity is extended without changing document contents. The current OpenFlux Mail.ru adaptation, disabled RACK/TLP, private-data redaction, card layout, Yandex verification and retained server flags remain in place.
+The [0.4.27 release](https://github.com/Flofyyk/PaperFluxAndroid/releases/tag/v0.4.27) includes core `0.5.16`, fixing Mail.ru document-history acknowledgements and recovery after editor rejection. Mail.ru failure reasons now appear in the event journal. Yandex fixes, disabled RACK/TLP, private-data redaction, card layout, verification and retained server flags remain in place.
 
 Use a dedicated empty document for Mail.ru: editable links receive periodic editor changes. Read-only links are accepted without those changes; connectivity still depends on the document service.
 

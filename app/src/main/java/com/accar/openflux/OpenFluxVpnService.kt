@@ -355,6 +355,9 @@ class OpenFluxVpnService : VpnService() {
                             // Stats are consumed by the UI but do not need to
                             // be written to Logcat on every native tick.
                             if (statsMatch == null) Log.i("OpenFluxNative", safe)
+                            if (provider == "mailru") MailruConnectionDiagnostics.message(safe)?.let { detail ->
+                                publishEvent("[TRANSPORT] $detail")
+                            }
                             statsMatch?.let { m ->
                                 acceptNativeStats(m.groupValues[1].toLong(), m.groupValues[2].toLong(), m.groupValues[3].toLong())
                             }
