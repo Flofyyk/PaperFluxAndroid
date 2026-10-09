@@ -3,6 +3,7 @@ import type { ConnectionStatus, LogCategory, LogEntry, LogLevel, SessionStats, S
 import { nowTime, uid } from "../utils/format";
 import { detailLevel, isVerificationWarning, readVerification } from "../utils/verification";
 import type { VerificationState } from "../utils/verification";
+import { VpnCommandGuard } from "../utils/vpnCommandGuard";
 
 const STAGES: Omit<Stage, "status">[] = [
   { id: "vpn", title: "VPN-интерфейс", description: "Создание системного туннеля устройства" },
@@ -20,6 +21,18 @@ export function useVpn(_opts: { autoReconnect: boolean; timeoutSec: number }) {
   const [verification, setVerification] = useState<VerificationState | null>(null);
   const [stats, setStats] = useState<SessionStats>({ durationSec: 0, ping: null, rxBytes: 0, txBytes: 0, rxRate: 0, txRate: 0 });
   const durationTimer = useRef<number | null>(null);
+  const control = useRef(new VpnCommandGuard(
+    () => window.localStorage.getItem("paperflux.vpn-control-until"),
+    value => window.localStorage.setItem("paperflux.vpn-control-until", value),
+  ));
+  const stopping = useRef(false);
+  const [disconnecting, setDisconnecting] = useState(false);
+  const [cooldownSeconds, setCooldownSeconds] = useState(() => Math.ceil(control.current.remaining(Date.now()) / 1000));
+  const stateRef = useRef<ConnectionStatus>("idle");
+  useEffect(() => {
+    const timer = window.setInterval(() => setCooldownSeconds(Math.ceil(control.current.remaining(Date.now()) / 1000)), 200);
+    return () => window.clearInterval(timer);
+  }, []);
 	const trafficSnapshot = useRef<{ rxBytes: number; txBytes: number; at: number } | null>(null);
 
   const pushLog = useCallback((message: string, level: LogLevel, category: LogCategory, stage: string) => {
@@ -61,10 +74,15 @@ export function useVpn(_opts: { autoReconnect: boolean; timeoutSec: number }) {
         // Log/stat broadcasts deliberately omit `state`. They must never
         // reset a successfully connected screen back to "connecting".
         const state = event.state;
+        if (state === "DISCONNECTING") { stopping.current = true; setDisconnecting(true); }
         if (Object.prototype.hasOwnProperty.call(event, "verification")) setVerification(readVerification(event.verification));
         else if (state === "DISCONNECTED" || state === "CONNECTING") setVerification(null);
         const mapped: ConnectionStatus | null = state === undefined ? null : state === "CONNECTED" ? "connected" : state === "ERROR" ? "error" : state === "DISCONNECTED" ? "idle" : state === "TRANSPORT" || state === "RECONNECTING" || state === "WAITING_NETWORK" ? "reconnecting" : "connecting";
-        if (mapped) setStatus((previous) => previous === mapped ? previous : mapped);
+        if (mapped) {
+          stateRef.current = mapped;
+          setStatus((previous) => previous === mapped ? previous : mapped);
+          if (mapped === "idle" || mapped === "error") { stopping.current = false; setDisconnecting(false); }
+        }
         if (state === "CONNECTING") {
           // A deliberate new session starts from zero.  Do not retain a
           // previous session's totals merely because its snapshot arrived
@@ -140,22 +158,36 @@ export function useVpn(_opts: { autoReconnect: boolean; timeoutSec: number }) {
   }, [pushLog, setStage, startStats, stopStats]);
 
   const connect = useCallback(() => {
+    if (stopping.current || !["idle", "error"].includes(stateRef.current) || !control.current.claim(Date.now())) return;
+    setCooldownSeconds(5);
+    stateRef.current = "connecting";
     const native = (window as unknown as { PaperFluxNative?: { connect?: () => void } }).PaperFluxNative;
     stopStats(); setStatus("connecting"); setErrorReason(null); setVerification(null); setStages(freshStages());
 	trafficSnapshot.current = null;
     setStats({ durationSec: 0, ping: null, rxBytes: 0, txBytes: 0, rxRate: 0, txRate: 0 });
     setLogs([]);
     pushLog("Запуск PaperFlux", "info", "connection", "Система");
-    if (native?.connect) native.connect();
-    else { setStatus("error"); setErrorReason("Нативный VPN-мост недоступен"); pushLog("Нативный VPN-мост недоступен", "error", "system", "Система"); }
+    try {
+      if (!native?.connect) throw new Error("Нативный VPN-мост недоступен");
+      native.connect();
+    } catch {
+      stateRef.current = "error"; setStatus("error"); setErrorReason("Не удалось отправить команду запуска VPN");
+      pushLog("Не удалось отправить команду запуска VPN", "error", "system", "Система");
+    }
   }, [pushLog, stopStats]);
   const disconnect = useCallback(() => {
+    if (stopping.current || ["idle", "error"].includes(stateRef.current) || !control.current.claim(Date.now())) return;
+    stopping.current = true; setDisconnecting(true); setCooldownSeconds(5);
     // The VPN interface lives in a separate Android process.  Keep the last
     // confirmed state until that process closes the TUN and broadcasts
     // DISCONNECTED; optimistic "off" was the source of a misleading UI
     // while Android still showed an active VPN.
     pushLog("Отключаем туннель…", "info", "connection", "Система");
-    (window as unknown as { PaperFluxNative?: { disconnect?: () => void } }).PaperFluxNative?.disconnect?.();
+    try {
+      const native = (window as unknown as { PaperFluxNative?: { disconnect?: () => void } }).PaperFluxNative;
+      if (!native?.disconnect) throw new Error("Нативный VPN-мост недоступен");
+      native.disconnect();
+    } catch { stopping.current = false; setDisconnecting(false); pushLog("Не удалось отправить команду остановки VPN", "error", "system", "Система"); }
   }, [pushLog]);
   const retry = useCallback(() => connect(), [connect]);
   const clearLogs = useCallback(() => {
@@ -165,5 +197,6 @@ export function useVpn(_opts: { autoReconnect: boolean; timeoutSec: number }) {
   const openVerification = useCallback(() => {
     (window as unknown as { PaperFluxNative?: { openVerification?: () => void } }).PaperFluxNative?.openVerification?.();
   }, []);
-  return { status, stages, logs, errorReason, authRequired: verification !== null, verification, openVerification, stats, connect, disconnect, retry, clearLogs, pushLog };
+  return { status, stages, logs, errorReason, authRequired: verification !== null, verification, openVerification, stats, connect, disconnect, retry, clearLogs, pushLog,
+    cooldownSeconds, disconnecting, controlDisabled: cooldownSeconds > 0 || disconnecting };
 }

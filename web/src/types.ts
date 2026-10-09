@@ -56,6 +56,7 @@ export interface AppExceptionItem {
 }
 
 export interface VpnSettings {
+  connectionMode: "vpn" | "proxy";
   documentUrl: string;
   dnsPrimary: string;
   dnsSecondary: string;

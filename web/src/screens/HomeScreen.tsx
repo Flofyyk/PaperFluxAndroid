@@ -22,6 +22,10 @@ export function HomeScreen({
   onOpenProfiles,
   onToggleConnection,
   onRetry,
+  cooldownSeconds,
+  controlDisabled,
+  disconnecting,
+  connectionMode,
 }: {
   status: ConnectionStatus;
   stages: Stage[];
@@ -33,6 +37,10 @@ export function HomeScreen({
   onOpenProfiles: () => void;
   onToggleConnection: () => void;
   onRetry: () => void;
+  cooldownSeconds: number;
+  controlDisabled: boolean;
+  disconnecting: boolean;
+  connectionMode: "vpn" | "proxy";
 }) {
   const active = status === "connected";
 
@@ -43,15 +51,17 @@ export function HomeScreen({
       <div className="@container flex-1 overflow-y-auto">
         <div className="flex flex-col items-center gap-3 px-5 pb-6 pt-4">
           <ActiveProfileCard profile={profile} onOpenProfiles={onOpenProfiles} />
-          <ConnectButton status={status} onPress={onToggleConnection} />
-          <StatusHint status={status} />
+          {connectionMode === "proxy" && <p className="text-center text-[13px] font-semibold text-primary">SOCKS5 · 127.0.0.1:1080 · без системного VPN</p>}
+          <ConnectButton status={status} onPress={onToggleConnection} disabled={controlDisabled} cooldownSeconds={cooldownSeconds} />
+          {disconnecting ? <p role="status" className="text-sm text-on-surface-variant">Отключаем {connectionMode === "proxy" ? "прокси" : "VPN"}…</p> : cooldownSeconds > 0 ?
+            <p role="status" className="text-sm text-on-surface-variant">Кнопка станет доступна через {cooldownSeconds} сек.</p> : <StatusHint status={status} proxy={connectionMode === "proxy"} />}
           <StatsGrid stats={stats} active={active} />
           {verification && !active && <div className="w-full"><VerificationCard verification={verification} onOpen={onOpenVerification} /></div>}
         </div>
 
         <div className="flex flex-col gap-3.5 px-5 pb-8 @[420px]:gap-4 @[420px]:px-6">
           <div>
-            <StatusCard status={status} profile={profile} />
+            <StatusCard status={status} profile={profile} proxy={connectionMode === "proxy"} />
           </div>
 
           {(status === "error" || status === "reconnecting") && errorReason && (
@@ -59,11 +69,12 @@ export function HomeScreen({
               <DisconnectCard
                 reason={errorReason}
                 onRetry={onRetry}
+                disabled={controlDisabled}
               />
             </div>
           )}
 
-          <StageList stages={transportStages(stages, profile)} />
+          <StageList stages={transportStages(stages, profile, connectionMode)} />
         </div>
       </div>
 

@@ -19,12 +19,12 @@ class VpnTilePermissionActivity : AppCompatActivity() {
         if (runCatching { ProfileStore(this).active() }.getOrNull() == null) {
             startActivity(Intent(this, MainActivity::class.java)); finish(); return
         }
-        val request = VpnService.prepare(this)
+        val request = if (NetworkSettingsStore(this).read().connectionMode == "proxy") null else VpnService.prepare(this)
         if (request == null) startVpn() else permission.launch(request)
     }
     private fun startVpn() {
         runCatching { ContextCompat.startForegroundService(this,
-            Intent(this, OpenFluxVpnService::class.java).setAction(OpenFluxVpnService.START))
+            ConnectionRuntime.intent(this, OpenFluxVpnService.START))
         }.onFailure { Toast.makeText(this, "Android не разрешил запуск VPN. Попробуйте из приложения", Toast.LENGTH_LONG).show() }
         finish()
     }

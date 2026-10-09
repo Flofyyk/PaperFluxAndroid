@@ -8,6 +8,7 @@ data class NetworkSettings(
     val connectTimeoutSec: Int = 15,
     val autoReconnect: Boolean = true,
     val autoConnect: Boolean = false,
+    val connectionMode: String = "vpn",
 ) {
     fun update(key: String, value: String): NetworkSettings = when (key) {
         "dnsPrimary" -> copy(dnsPrimary = dns(value))
@@ -16,6 +17,7 @@ data class NetworkSettings(
         "connectTimeoutSec" -> copy(connectTimeoutSec = number(value, 5..120))
         "autoReconnect" -> copy(autoReconnect = boolean(value))
         "autoConnect" -> copy(autoConnect = boolean(value))
+        "connectionMode" -> copy(connectionMode = value.also { require(it in setOf("vpn", "proxy")) { "Неизвестный режим подключения" } })
         else -> throw IllegalArgumentException("Неизвестная настройка")
     }
 

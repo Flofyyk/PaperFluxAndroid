@@ -65,7 +65,7 @@ test('settings omit the tile-add button while the system tile remains registered
   const { SettingsScreen } = load('../src/screens/SettingsScreen.tsx');
   const { ToastProvider } = load('../src/hooks/useToast.tsx');
   const screen = React.createElement(SettingsScreen, {
-    settings: { dnsPrimary: '77.88.8.8', dnsSecondary: '77.88.8.1', mtu: 1400, connectTimeoutSec: 15, autoReconnect: true, autoConnect: false },
+    settings: { connectionMode: 'vpn', dnsPrimary: '77.88.8.8', dnsSecondary: '77.88.8.1', mtu: 1400, connectTimeoutSec: 15, autoReconnect: true, autoConnect: false },
     apps: [], onUpdate: () => '', onToggleApp: () => '', onReset: () => '',
   });
   const html = renderToStaticMarkup(React.createElement(ToastProvider, null, screen));
@@ -77,4 +77,26 @@ test('settings omit the tile-add button while the system tile remains registered
   assert.match(manifest, /android.service.quicksettings.action.QS_TILE/);
   const activity = fs.readFileSync(path.resolve(__dirname, '../../app/src/main/java/com/accar/openflux/MainActivity.kt'), 'utf8');
   assert.doesNotMatch(activity, /addQuickSettingsTile|requestAddTileService/);
+});
+
+test('proxy mode describes only SOCKS traffic, hides VPN-only settings, keeps provider label', () => {
+  const { SettingsScreen } = load('../src/screens/SettingsScreen.tsx');
+  const { ToastProvider } = load('../src/hooks/useToast.tsx');
+  const screen = React.createElement(SettingsScreen, {
+    settings: { connectionMode: 'proxy', dnsPrimary: '77.88.8.8', dnsSecondary: '77.88.8.1', mtu: 1400, connectTimeoutSec: 15, autoReconnect: true, autoConnect: false },
+    apps: [], onUpdate: () => '', onToggleApp: () => '', onReset: () => '', routingMode: 'exclude', onRoutingMode: () => '',
+  });
+  const html = renderToStaticMarkup(React.createElement(ToastProvider, null, screen));
+  assert.match(html, /VPN или прокси/);
+  assert.match(html, /127.0.0.1:1080/);
+  assert.match(html, /без UDP и IPv6/);
+  assert.doesNotMatch(html, /Основной DNS|Максимальный размер пакета|Приложения и VPN/);
+  assert.match(render(StatusCard, { status: 'connected', proxy: true }), /Только приложения/);
+  assert.match(render(StatusHint, { status: 'connected', proxy: true }), /системный VPN не включён/);
+  const stages = transportStages([{ id: 'vpn', title: 'VPN', description: 'TUN', status: 'running' }, { id: 'transport', title: 'Yandex', description: '', status: 'pending' }], profile('mailru'), 'proxy');
+  assert.equal(stages[0].title, 'Локальный SOCKS5');
+  assert.equal(stages[1].title, 'Mail.ru Документы');
+  const manifest = fs.readFileSync(path.resolve(__dirname, '../../app/src/main/AndroidManifest.xml'), 'utf8');
+  const proxyService = manifest.match(/<service android:name="\.OpenFluxProxyService"[\s\S]*?<\/service>/)[0];
+  assert.doesNotMatch(proxyService, /BIND_VPN_SERVICE|android.net.VpnService|exported="true"/);
 });

@@ -46,9 +46,10 @@ const meta: Record<
   },
 };
 
-export const StatusCard = memo(function StatusCard({ status, profile }: { status: ConnectionStatus; profile?: PaperFluxProfile }) {
+export const StatusCard = memo(function StatusCard({ status, profile, proxy = false }: { status: ConnectionStatus; profile?: PaperFluxProfile; proxy?: boolean }) {
   const m = meta[status];
-  const description = status === "connected" && profile
+  const title = proxy && status === "connected" ? "Прокси активен" : proxy && status === "idle" ? "Прокси отключён" : m.title;
+  const description = proxy ? (status === "connected" ? "SOCKS5 127.0.0.1:1080. Только приложения, настроенные на прокси, используют защищённый канал." : status === "idle" ? "Системный VPN не включён. Для подключения приложениям нужен адрес SOCKS5." : m.desc) : status === "connected" && profile
     ? `Трафик маршрутизируется через ${transportPresentation(profile).label}.`
     : m.desc;
   const Icon = m.icon;
@@ -60,7 +61,7 @@ export const StatusCard = memo(function StatusCard({ status, profile }: { status
         <Icon className={cn("h-7 w-7", m.iconColor, spinning && "pf-spin")} strokeWidth={2} />
       </div>
       <div className="min-w-0">
-        <p className="text-[15.5px] font-bold text-on-surface">{m.title}</p>
+        <p className="text-[15.5px] font-bold text-on-surface">{title}</p>
         <p className="mt-0.5 text-[13px] leading-snug text-on-surface-variant">{description}</p>
       </div>
     </Card>

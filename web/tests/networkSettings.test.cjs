@@ -61,3 +61,15 @@ test('browser preview persists valid DNS, rejects incomplete edits and resets', 
   assert.equal(settings.resetNetworkSettings(), '');
   assert.equal(load(window).loadNetworkSettings().dnsPrimary, '77.88.8.8');
 });
+
+test('legacy settings default to VPN; proxy mode persists and rejects unknown values', () => {
+  const values = new Map();
+  const window = { localStorage: { getItem: key => values.get(key) ?? null, setItem: (key, value) => values.set(key, value), removeItem: key => values.delete(key) } };
+  const settings = load(window);
+  assert.equal(settings.loadNetworkSettings().connectionMode, 'vpn');
+  assert.equal(settings.saveNetworkSetting('connectionMode', 'proxy'), '');
+  assert.equal(load(window).loadNetworkSettings().connectionMode, 'proxy');
+  assert.match(settings.saveNetworkSetting('connectionMode', 'http'), /^Ошибка/);
+  assert.equal(load(window).loadNetworkSettings().connectionMode, 'proxy');
+  assert.equal(load({ PaperFluxNative: { getNetworkSettings: () => JSON.stringify(defaults) } }).loadNetworkSettings().connectionMode, 'vpn');
+});

@@ -51,7 +51,8 @@ class PaperFluxTileService : TileService() {
     private fun updateTile() {
         val tile = qsTile ?: return
         val state = TunnelSnapshot.read(this).optString("state")
-        tile.label = "PaperFlux"
+        val proxy = NetworkSettingsStore(this).read().connectionMode == "proxy"
+        tile.label = if (proxy) "PaperFlux · Прокси" else "PaperFlux"
         tile.state = if (VpnTilePolicy.active(state)) Tile.STATE_ACTIVE else Tile.STATE_INACTIVE
         if (Build.VERSION.SDK_INT >= 29) tile.subtitle = VpnTilePolicy.subtitle(state)
         tile.contentDescription = "PaperFlux: ${VpnTilePolicy.subtitle(state)}"
@@ -59,16 +60,17 @@ class PaperFluxTileService : TileService() {
     }
     private fun toggle() {
         val state = TunnelSnapshot.read(this).optString("state")
+        if (state == "DISCONNECTING") return
         val stop = VpnTilePolicy.active(state)
-        if (!stop && (VpnService.prepare(this) != null || runCatching { ProfileStore(this).active() }.getOrNull() == null)) {
+        val proxy = NetworkSettingsStore(this).read().connectionMode == "proxy"
+        if (!stop && ((!proxy && VpnService.prepare(this) != null) || runCatching { ProfileStore(this).active() }.getOrNull() == null)) {
             openPermissionActivity()
             return
         }
         runCatching {
             // START fulfils the foreground-service deadline; STOP is a command
             // to an already running service, not a new foreground-service start.
-            val intent = Intent(this, OpenFluxVpnService::class.java)
-                .setAction(if (stop) OpenFluxVpnService.STOP else OpenFluxVpnService.START)
+            val intent = ConnectionRuntime.intent(this, if (stop) OpenFluxVpnService.STOP else OpenFluxVpnService.START)
             if (stop) startService(intent) else ContextCompat.startForegroundService(this, intent)
         }.onFailure { openPermissionActivity() }
         updateTile()

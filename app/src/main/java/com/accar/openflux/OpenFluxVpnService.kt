@@ -32,7 +32,8 @@ import java.util.concurrent.atomic.AtomicInteger
 import java.util.Locale
 import java.util.concurrent.TimeUnit
 
-class OpenFluxVpnService : VpnService() {
+open class OpenFluxVpnService : VpnService() {
+    protected open val proxyMode = false
     private val worker = Executors.newSingleThreadExecutor()
     private val leaseWorker = Executors.newSingleThreadScheduledExecutor()
     @Volatile private var leaseFuture: ScheduledFuture<*>? = null
@@ -46,7 +47,7 @@ class OpenFluxVpnService : VpnService() {
     @Volatile private var fullRecoveryFuture: ScheduledFuture<*>? = null
     @Volatile private var appRoutingFuture: ScheduledFuture<*>? = null
     private val appRoutingGeneration = AtomicInteger(0)
-    @Volatile private var selectedExclusions: Set<String>? = null
+    @Volatile private var selectedRouting: AppRoutingConfig? = null
     @Volatile private var reconnectAttempt = 0
     private val serverFailover = ServerFailover()
     @Volatile private var endpointKey: String? = null
@@ -62,6 +63,7 @@ class OpenFluxVpnService : VpnService() {
     @Volatile private var nativeAuthenticated = false
     @Volatile private var authActionRequired: String? = null
     @Volatile private var nativeTunnelReady = false
+    @Volatile private var nativeProxyListening = false
     @Volatile private var stopping = false
     @Volatile private var starting = false
     @Volatile private var statsRunning = false
@@ -108,6 +110,7 @@ class OpenFluxVpnService : VpnService() {
     private fun handleStartCommand(intent: Intent?, startId: Int): Int {
         if (intent?.action == STOP) { stopTunnel(); return START_NOT_STICKY }
         if (intent?.action == UPDATE_APP_ROUTING) {
+            if (proxyMode) return START_STICKY
             if (!wantsConnection()) {
                 stopSelf(startId)
                 return START_NOT_STICKY
@@ -143,6 +146,7 @@ class OpenFluxVpnService : VpnService() {
         // START. Never leave Android's foreground deadline pending on an early
         // return or while profile/connection validation runs.
         startForeground(NOTIFICATION_ID, notification(if (nativeTunnelReady) connectedNotificationText() else "PaperFlux: подключение"))
+        check((NetworkSettingsStore(this).read().connectionMode == "proxy") == proxyMode) { "Режим подключения изменился. Повторите запуск из приложения" }
         if (starting || tunnelRunning) return START_STICKY
         val resuming = intent.getBooleanExtra(EXTRA_RESUME, false)
         // Cups uses a packed room list rather than an HTTPS URL. Validation
@@ -200,6 +204,7 @@ class OpenFluxVpnService : VpnService() {
             tunnelRunning = false
             nativeAuthenticated = false
             nativeTunnelReady = false
+            nativeProxyListening = false
             lastNativeStatsAt = 0L
             requireValidatedNetwork()
             val primary = ProfileStore(this).active() ?: error("Добавьте действующий профиль PaperFlux")
@@ -249,32 +254,39 @@ class OpenFluxVpnService : VpnService() {
             check(profileId.isNotBlank() && profileToken.isNotBlank() && clientIp.isNotBlank()) {
                 "Добавьте действующий профиль PaperFlux перед подключением"
             }
-            publish("TUN", "Настраиваем VPN-интерфейс")
+            publish("TUN", if (proxyMode) "Запускаем локальный SOCKS5 без VPN-интерфейса" else "Настраиваем VPN-интерфейс")
             val socketName = "openflux_tun_${android.os.Process.myPid()}_${System.nanoTime()}"
             val binary = File(applicationInfo.nativeLibraryDir, "libopenflux.so")
             check(binary.exists()) { "Нативное ядро OpenFlux не найдено" }
             // Establish the VPN first, with this app excluded, so every
             // OpenFlux transport socket is born on the underlying network.
             val networkSettings = NetworkSettingsStore(this).read()
+            if (!proxyMode) {
             val builder = Builder().setSession("PaperFlux").setMtu(networkSettings.mtu)
                 .addAddress(clientIp, 24)
-                .addDisallowedApplication(packageName)
                 // User DNS applies to apps inside the tunnel; bootstrap DNS
                 // for the excluded transport remains on the physical network.
                 .addDnsServer(networkSettings.dnsPrimary)
                 .addDnsServer(networkSettings.dnsSecondary)
                 .addRoute("0.0.0.0", 0)
-            val excludedApps = AppRoutingStore(this).read()
-            var excludedCount = 0
-            excludedApps.forEach { packageName ->
+            val routing = AppRoutingStore(this).config()
+            if (routing.mode == AppRoutingConfig.EXCLUDE) builder.addDisallowedApplication(packageName)
+            var selectedCount = 0
+            routing.selected.filter { it != packageName }.forEach { selectedPackage ->
                 try {
-                    builder.addDisallowedApplication(packageName)
-                    excludedCount++
+                    if (routing.mode == AppRoutingConfig.INCLUDE) builder.addAllowedApplication(selectedPackage)
+                    else builder.addDisallowedApplication(selectedPackage)
+                    selectedCount++
                 } catch (_: android.content.pm.PackageManager.NameNotFoundException) {
                     Log.i("OpenFluxVpn", "Excluded application was uninstalled: $packageName")
                 }
             }
-            val configuration = networkSettings.tunnelKey(clientIp, excludedApps)
+            if (routing.mode == AppRoutingConfig.INCLUDE && selectedCount == 0) {
+                publish("ERROR", "Выберите хотя бы одно установленное приложение для VPN")
+                stopTunnel(announce = false)
+                return
+            }
+            val configuration = networkSettings.tunnelKey(clientIp, routing.selected) + "|" + routing.mode
             if (!current()) return
             if (tun == null || tunConfiguration != configuration) {
                 val replacement = builder.establish() ?: error("Не удалось создать Android TUN")
@@ -284,8 +296,9 @@ class OpenFluxVpnService : VpnService() {
                 tunConfiguration = configuration
                 runCatching { previous?.close() }
             }
-            selectedExclusions = excludedApps
-            Log.i("OpenFluxVpn", "Application routing applied: excluded=$excludedCount")
+            selectedRouting = routing
+            Log.i("OpenFluxVpn", "Application routing applied: mode=${routing.mode}, selected=$selectedCount")
+            }
             val documentUrls = documentUrl.split(',').map { it.trim() }.filter { it.isNotEmpty() }
             val volgaUrl = identity.optString("volgaUrl").trim()
             check(documentUrls.isNotEmpty()) { "В профиле нет ссылки или комнат транспорта" }
@@ -311,7 +324,8 @@ class OpenFluxVpnService : VpnService() {
             if (profileId.isNotBlank()) command += listOf("--profile-id", profileId)
             if (profileToken.isNotBlank()) command += listOf("--profile-token", profileToken)
             if (clientIp.isNotBlank()) command += listOf("--client-ip", clientIp)
-            command += listOf("--tun-fd-sock", "@$socketName")
+            command += if (proxyMode) listOf("--android-proxy", "--socks5", ConnectionRuntime.PROXY_ADDRESS)
+                else listOf("--tun-fd-sock", "@$socketName")
             process = ProcessBuilder(command).apply {
                 directory(filesDir); redirectErrorStream(true)
                 environment()["LD_LIBRARY_PATH"] = applicationInfo.nativeLibraryDir
@@ -397,6 +411,7 @@ class OpenFluxVpnService : VpnService() {
                                 if (tunnelRunning && !stopping) TunnelSnapshot.write(this@OpenFluxVpnService, "CONNECTED", "Шифрованный туннель: DNS и TCP подтверждены")
                                 if (recovered && tunnelRunning && !stopping) publish("CONNECTED", "Шифрованный туннель: DNS и TCP подтверждены")
                             }
+                            if (current() && safe.contains("[PAPERFLUX] SOCKS_READY")) nativeProxyListening = true
                             if (current() && (safe.contains("PEER_LOST") || safe.contains("TUNNEL_LOST"))) {
                                 nativeTunnelReady = false
                                 publish("RECONNECTING", "Нет ответа через защищённый канал")
@@ -448,12 +463,14 @@ class OpenFluxVpnService : VpnService() {
             if (!current()) return
             check(nativeAuthenticated) { "Не удалось подтвердить защищённое соединение. Проверьте профиль и повторите попытку" }
             if (NativeAuthBridge.read(File(noBackupFilesDir, "auth-request.json")) == null) authActionRequired = null
-            sendTunFd(socketName, tun!!)
+            if (!proxyMode) sendTunFd(socketName, tun!!)
             publish("DNS", "Проверяем DNS и TCP через защищённый канал")
             val tunnelDeadline = System.currentTimeMillis() + 35_000
-            while (current() && !nativeTunnelReady && child.isAlive && System.currentTimeMillis() < tunnelDeadline) Thread.sleep(200)
+            while (current() && (!nativeTunnelReady || (proxyMode && !nativeProxyListening)) && child.isAlive && System.currentTimeMillis() < tunnelDeadline) Thread.sleep(200)
             if (!current()) return
+            check(child.isAlive) { "Нативный транспорт завершился во время подключения" }
             check(nativeTunnelReady) { "Защищённый канал создан, но доступ к интернету пока не подтверждён" }
+            check(!proxyMode || nativeProxyListening) { "Не удалось открыть локальный порт SOCKS5" }
             tunnelRunning = true
             serverFailover.healthy(selectedKey)
             reconnectAttempt = 0
@@ -629,17 +646,18 @@ class OpenFluxVpnService : VpnService() {
         synchronized(workerSockets) { workerSockets.forEach { runCatching { it.close() } }; workerSockets.clear() }
         synchronized(workerProcesses) { workerProcesses.forEach { runCatching { it.destroy() } }; workerProcesses.clear() }
     }
-    private fun keepVpnDuringFailover() = VpnRecoveryPolicy.retainInterface(
+    private fun keepVpnDuringFailover() = !proxyMode && VpnRecoveryPolicy.retainInterface(
         wantsConnection(), autoReconnectEnabled(), stopping)
     private fun releaseTunnelResources(keepTun: Boolean = false) {
         leaseFuture?.cancel(false); leaseFuture = null
         stopProcessOnly()
         if (!keepTun) { runCatching { tun?.close() }; tun = null; tunConfiguration = null }
         for (name in listOf("auth-request.json", "auth-offer.json", "auth-command.json")) File(noBackupFilesDir, name).delete()
-        nativeAuthenticated = false; nativeTunnelReady = false; tunnelRunning = false
+        nativeAuthenticated = false; nativeTunnelReady = false; nativeProxyListening = false; tunnelRunning = false
     }
     private fun stopTunnel(announce: Boolean = true, clearDesired: Boolean = true) {
         if (clearDesired) preferences().edit().putBoolean(DESIRED_ACTIVE, false).apply()
+        if (announce) publish("DISCONNECTING", if (proxyMode) "Отключаем прокси…" else "Отключаем VPN…")
         sessionGeneration.incrementAndGet()
         cancelReconnects()
         appRoutingGeneration.incrementAndGet()
@@ -649,7 +667,7 @@ class OpenFluxVpnService : VpnService() {
         statsRunning = false
         networkWatchRunning = false
         cancelRestartAlarm(); releaseTunnelResources()
-        if (announce) publish("DISCONNECTED", "Туннель отключён")
+        if (announce) publish("DISCONNECTED", if (proxyMode) "Локальный прокси отключён" else "Туннель отключён")
         stopForeground(STOP_FOREGROUND_REMOVE)
         (getSystemService(NOTIFICATION_SERVICE) as NotificationManager).cancel(NOTIFICATION_ID)
         stopSelf()
@@ -665,7 +683,7 @@ class OpenFluxVpnService : VpnService() {
                 // and must not overwrite the tunnel counters.
                 if (nativeTunnelReady) {
                     persistAndBroadcastStats()
-                    updateNotification("Подключено · ↓ ${formatBytes(lastRxBytes)}  ↑ ${formatBytes(lastTxBytes)}")
+                    updateNotification(connectedNotificationText())
                 }
                 try { Thread.sleep(5000) } catch (_: InterruptedException) { break }
             }
@@ -778,18 +796,18 @@ class OpenFluxVpnService : VpnService() {
         // once, through the same worker that owns native/TUN startup.
         appRoutingFuture = reconnectWorker.schedule({
             if (generation != appRoutingGeneration.get() || !wantsConnection() || stopping) return@schedule
-            val latest = runCatching { AppRoutingStore(this).read() }.getOrElse {
+            val latest = runCatching { AppRoutingStore(this).config() }.getOrElse {
                 Log.e("OpenFluxVpn", "Cannot read application routing", it)
-                publishEvent("Не удалось применить исключения приложений")
+                publishEvent("Не удалось применить режим приложений")
                 return@schedule
             }
-            if (latest == selectedExclusions && tun != null && nativeTunnelReady && !starting) return@schedule
+            if (latest == selectedRouting && tun != null && nativeTunnelReady && !starting) return@schedule
             val replacement = sessionGeneration.incrementAndGet()
             cancelReconnects()
             starting = true
             nativeTunnelReady = false
             tunnelRunning = false
-            publish("RECONNECTING", "Применяем исключения приложений")
+            publish("RECONNECTING", "Применяем режим приложений")
             worker.execute {
                 if (generation == appRoutingGeneration.get() && replacement == sessionGeneration.get() && wantsConnection() && !stopping) {
                     releaseTunnelResources(keepTun = keepVpnDuringFailover())
@@ -941,13 +959,14 @@ class OpenFluxVpnService : VpnService() {
         worker.shutdownNow(); leaseWorker.shutdownNow(); reconnectWorker.shutdownNow(); super.onDestroy()
     }
     override fun onRevoke() {
+        if (proxyMode) return
         // Android revoked the system VPN permission.  There is no usable TUN
         // to reconnect to, so remove the foreground state and require a new
         // explicit user start instead of leaving a misleading VPN icon.
         stopTunnel(announce = true, clearDesired = true)
         super.onRevoke()
     }
-    override fun onBind(intent: Intent?): IBinder? = if (intent?.action == SERVICE_INTERFACE) super.onBind(intent) else null
+    override fun onBind(intent: Intent?): IBinder? = if (!proxyMode && intent?.action == SERVICE_INTERFACE) super.onBind(intent) else null
     private fun notification(text: String): Notification {
         val pendingAuth = authActionRequired != null && NativeAuthBridge.read(File(noBackupFilesDir, "auth-request.json")) != null
         val destination = if (pendingAuth) YandexAuthActivity::class.java else MainActivity::class.java
@@ -969,13 +988,13 @@ class OpenFluxVpnService : VpnService() {
                     PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE))
         }
         .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Отключить",
-            PendingIntent.getService(this, 921, Intent(this, OpenFluxVpnService::class.java).setAction(STOP), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE))
+            PendingIntent.getService(this, 921, Intent(this, javaClass).setAction(STOP), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE))
         .build()
     }
     private fun updateNotification(text: String) {
         (getSystemService(NOTIFICATION_SERVICE) as NotificationManager).notify(NOTIFICATION_ID, notification(text))
     }
-    private fun connectedNotificationText() = "Подключено · ↓ ${formatBytes(lastRxBytes)}  ↑ ${formatBytes(lastTxBytes)}"
+    private fun connectedNotificationText() = (if (proxyMode) "SOCKS5 ${ConnectionRuntime.PROXY_ADDRESS}" else "Подключено") + " · ↓ ${formatBytes(lastRxBytes)}  ↑ ${formatBytes(lastTxBytes)}"
     override fun onCreate() {
         super.onCreate()
         (getSystemService(Service.NOTIFICATION_SERVICE) as NotificationManager).createNotificationChannel(NotificationChannel(CHANNEL, "PaperFlux VPN", NotificationManager.IMPORTANCE_DEFAULT))

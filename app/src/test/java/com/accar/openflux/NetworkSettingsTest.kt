@@ -4,6 +4,15 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class NetworkSettingsTest {
+    @Test fun connectionModeDefaultsToVpnAndRequiresExactKnownValue() {
+        assertEquals("vpn", NetworkSettings().connectionMode)
+        val proxy = NetworkSettings().update("connectionMode", "proxy")
+        assertEquals("proxy", proxy.connectionMode)
+        assertEquals("proxy", proxy.update("mtu", "1280").connectionMode)
+        for (raw in listOf("", "socks", "VPN", "http", "proxy ")) {
+            assertThrows(IllegalArgumentException::class.java) { proxy.update("connectionMode", raw) }
+        }
+    }
     @Test fun customDnsDoesNotResetOtherSettings() {
         val settings = NetworkSettings().update("dnsPrimary", "1.1.1.1").update("dnsSecondary", "8.8.8.8")
             .update("mtu", "1280").update("autoReconnect", "false").update("autoConnect", "true").update("connectTimeoutSec", "30")

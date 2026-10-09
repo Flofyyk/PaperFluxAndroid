@@ -395,7 +395,7 @@ class MainActivity : AppCompatActivity() {
                     .putExtra("request-id", request.optString("requestId")))
             }
         }
-        @JavascriptInterface fun disconnect() = runOnUiThread { startService(Intent(this@MainActivity, OpenFluxVpnService::class.java).setAction(OpenFluxVpnService.STOP)) }
+        @JavascriptInterface fun disconnect() = runOnUiThread { startService(ConnectionRuntime.intent(this@MainActivity, OpenFluxVpnService.STOP)) }
         @JavascriptInterface fun setAutoReconnect(enabled: Boolean) {
             NetworkSettingsStore(this@MainActivity).update("autoReconnect", enabled.toString())
             notifyAutoReconnect(enabled)
@@ -405,16 +405,19 @@ class MainActivity : AppCompatActivity() {
             NetworkSettingsStore.json(NetworkSettingsStore(this@MainActivity).read()).toString()
         } catch (_: Exception) { org.json.JSONObject().put("error", "Не удалось прочитать настройки сети").toString() }
         @JavascriptInterface fun setNetworkSetting(key: String, value: String): String = try {
+            require(key != "connectionMode" || !ConnectionRuntime.running(this@MainActivity)) { "сначала отключите PaperFlux, затем смените режим" }
             val settings = NetworkSettingsStore(this@MainActivity).update(key, value)
             if (key == "autoReconnect") notifyAutoReconnect(settings.autoReconnect)
             ""
         } catch (error: IllegalArgumentException) { "Ошибка: ${error.message}" }
         catch (_: Exception) { "Ошибка: не удалось сохранить настройку" }
         @JavascriptInterface fun resetNetworkSettings(): String = try {
+            require(!ConnectionRuntime.running(this@MainActivity)) { "сначала отключите PaperFlux перед сбросом настроек" }
             val settings = NetworkSettingsStore(this@MainActivity).reset()
             notifyAutoReconnect(settings.autoReconnect)
             ""
-        } catch (_: Exception) { "Ошибка: не удалось сбросить настройки сети" }
+        } catch (error: IllegalArgumentException) { "Ошибка: ${error.message}" }
+        catch (_: Exception) { "Ошибка: не удалось сбросить настройки сети" }
         @JavascriptInterface fun getDocumentUrl(): String = getSharedPreferences(OpenFluxVpnService.PREFS, MODE_PRIVATE).getString("document", "") ?: ""
         @JavascriptInterface fun setDocumentUrl(value: String) {
             getSharedPreferences(OpenFluxVpnService.PREFS, MODE_PRIVATE).edit().putString("document", value.trim()).apply()
@@ -490,7 +493,7 @@ class MainActivity : AppCompatActivity() {
         @JavascriptInterface fun clearSessionLogs() { SessionJournal.clear(this@MainActivity) }
         @JavascriptInterface fun getInstalledApps(): String {
             val apps = org.json.JSONArray(installedAppsCache ?: installedAppsJson(includeIcons = false))
-            val excluded = AppRoutingStore(this@MainActivity).read()
+            val excluded = AppRoutingStore(this@MainActivity).config().selected
             for (i in 0 until apps.length()) apps.getJSONObject(i).let { it.put("excluded", it.getString("pkg") in excluded) }
             return apps.toString()
         }
@@ -500,36 +503,54 @@ class MainActivity : AppCompatActivity() {
         @JavascriptInterface fun setExcludedApps(raw: String): String = try {
             saveAppExclusions(AppRoutingStore.decode(raw))
         } catch (error: Exception) { "Ошибка: некорректный список исключений" }
+        @JavascriptInterface fun getAppRouting(): String = try {
+            AppRoutingStore.json(AppRoutingStore(this@MainActivity).config()).toString()
+        } catch (_: Exception) { "{\"error\":\"Не удалось прочитать режим приложений\"}" }
+        @JavascriptInterface fun setAppRouting(raw: String): String = try {
+            val config = AppRoutingStore.decodeConfig(raw)
+            if (config.mode == AppRoutingConfig.INCLUDE && config.usableSelection(packageName) {
+                    runCatching { packageManager.getApplicationInfo(it, 0) }.isSuccess
+                }.isEmpty() && vpnProcessAlive() && NetworkSettingsStore(this@MainActivity).read().connectionMode == "vpn") {
+                "Ошибка: остановите VPN и выберите приложения для режима «Только выбранные»"
+            } else {
+                AppRoutingStore(this@MainActivity).saveConfig(config)
+                notifyAppRouting()
+                "Режим приложений сохранён"
+            }
+        } catch (_: Exception) { "Ошибка: не удалось сохранить режим приложений" }
     }
 
     private fun saveAppExclusions(values: Set<String>): String = try {
         AppRoutingStore(this).save(values)
-        runOnUiThread {
-            // An idle VPN needs no service. Starting it just to save switches
-            // races with a following START/stopSelf and background restrictions.
-            if (vpnProcessAlive()) runCatching {
-                startService(Intent(this, OpenFluxVpnService::class.java).setAction(OpenFluxVpnService.UPDATE_APP_ROUTING))
-            }.onFailure { sendWebState(null, event = "Исключения сохранены. Применятся при следующем подключении") }
-        }
+        notifyAppRouting()
         "Исключения сохранены"
     } catch (error: Exception) { "Ошибка: не удалось сохранить исключения" }
 
-    private fun vpnProcessAlive(): Boolean = getSystemService(android.app.ActivityManager::class.java)
-        .runningAppProcesses?.any { it.processName == "$packageName:vpn" } == true
+    private fun notifyAppRouting() {
+        runOnUiThread {
+            // An idle VPN needs no service. Starting it just to save switches
+            // races with a following START/stopSelf and background restrictions.
+            if (vpnProcessAlive() && NetworkSettingsStore(this).read().connectionMode == "vpn") runCatching {
+                startService(Intent(this, OpenFluxVpnService::class.java).setAction(OpenFluxVpnService.UPDATE_APP_ROUTING))
+            }.onFailure { sendWebState(null, event = "Исключения сохранены. Применятся при следующем подключении") }
+        }
+    }
+
+    private fun vpnProcessAlive(): Boolean = ConnectionRuntime.running(this)
 
     private fun notifyAutoReconnect(enabled: Boolean) {
         // Do not write cached Activity preferences over the VPN process's
         // desired-active/session state. The atomic store is authoritative.
         runOnUiThread {
             if (vpnProcessAlive()) runCatching {
-                startService(Intent(this, OpenFluxVpnService::class.java).setAction(OpenFluxVpnService.UPDATE_SETTINGS)
+                startService(ConnectionRuntime.intent(this, OpenFluxVpnService.UPDATE_SETTINGS)
                     .putExtra(OpenFluxVpnService.EXTRA_AUTO_RECONNECT, enabled))
             }
         }
     }
 
     private fun installedAppsJson(includeIcons: Boolean): String {
-        val excluded = AppRoutingStore(this).read()
+        val excluded = AppRoutingStore(this).config().selected
         val collator = Collator.getInstance(Locale.getDefault())
         val apps = packageManager.getInstalledApplications(0)
             .filter { it.packageName != packageName && (it.packageName in excluded ||
@@ -616,7 +637,7 @@ class MainActivity : AppCompatActivity() {
                 // to cancel a slow bootstrap/authentication attempt, not only an
                 // already connected tunnel.
                 if (currentState in setOf("CONNECTING", "TUN", "TRANSPORT", "CONNECTED")) {
-                    startService(Intent(this@MainActivity, OpenFluxVpnService::class.java).setAction(OpenFluxVpnService.STOP))
+                    startService(ConnectionRuntime.intent(this@MainActivity, OpenFluxVpnService.STOP))
                 } else {
                     requestConnect()
                 }
@@ -746,6 +767,14 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun requestConnect() {
+        val proxy = runCatching { NetworkSettingsStore(this).read().connectionMode == "proxy" }.getOrDefault(false)
+        val routing = runCatching { AppRoutingStore(this).config() }.getOrNull()
+        if (!proxy && (routing == null || (routing.mode == AppRoutingConfig.INCLUDE && routing.usableSelection(packageName) {
+                runCatching { packageManager.getApplicationInfo(it, 0) }.isSuccess
+            }.isEmpty()))) {
+            sendWebState("ERROR", "Выберите хотя бы одно установленное приложение для VPN")
+            return
+        }
         val profile = runCatching { ProfileStore(this).active() }.getOrNull()
         val link = profile?.optString("documentUrl").orEmpty()
         val provider = profile?.optString("transport", "yandex") ?: "yandex"
@@ -757,7 +786,7 @@ class MainActivity : AppCompatActivity() {
         // Do not replay a refused/timeout event from a previous VPN session.
         // The VPN process begins the journal and writes its own lifecycle
         // preferences. Activity must not overwrite that cross-process file.
-        val request = VpnService.prepare(this)
+        val request = if (proxy) null else VpnService.prepare(this)
         if (request == null) requestNotificationThenStart() else permission.launch(request)
     }
     private fun maybeAutoConnect() {
@@ -777,7 +806,7 @@ class MainActivity : AppCompatActivity() {
     private fun startOpenFlux() {
         if (::connectButton.isInitialized) renderState("CONNECTING", "Запрашиваем разрешение и запускаем туннель")
         runCatching {
-            startForegroundService(Intent(this, OpenFluxVpnService::class.java).setAction(OpenFluxVpnService.START))
+            startForegroundService(ConnectionRuntime.intent(this, OpenFluxVpnService.START))
         }.onFailure {
             sendWebState("ERROR", "Android не разрешил запуск VPN. Откройте приложение и повторите попытку")
             android.util.Log.e("PaperFluxStart", "VPN service launch failed", it)

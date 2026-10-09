@@ -15,6 +15,10 @@ internal object YandexCheckPresentation {
     fun canDismissForReadyTunnel(automatic: Boolean, submitted: Boolean, tunnelReady: Boolean) =
         tunnelReady && (automatic || submitted)
 
+    fun canReturnAfterHandoff(submitted: Boolean, nativeReceived: Boolean, pageComplete: Boolean,
+        pageFailed: Boolean, checkpoint: Boolean) =
+        submitted && nativeReceived && pageComplete && !pageFailed && !checkpoint
+
     // A recovered alternative lane is not permission to discard a completed
     // browser check before its cookies have been handed to the native process.
     fun shouldDeferAutomaticDismissal(checkingPage: Boolean, submitted: Boolean,

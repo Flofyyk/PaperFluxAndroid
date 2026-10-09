@@ -4,7 +4,7 @@ import { DEFAULT_SETTINGS } from "../data/defaults";
 export type NetworkSettings = Omit<VpnSettings, "documentUrl">;
 type Bridge = { getNetworkSettings?: () => string; setNetworkSetting?: (key: string, value: string) => string; resetNetworkSettings?: () => string };
 const storageKey = "paperflux.network-settings.v1";
-const keys = ["dnsPrimary", "dnsSecondary", "mtu", "autoReconnect", "autoConnect", "connectTimeoutSec"] as const;
+const keys = ["dnsPrimary", "dnsSecondary", "mtu", "autoReconnect", "autoConnect", "connectTimeoutSec", "connectionMode"] as const;
 const bridge = () => (window as Window & { PaperFluxNative?: Bridge }).PaperFluxNative;
 
 function decode(raw: string): NetworkSettings {
@@ -12,9 +12,11 @@ function decode(raw: string): NetworkSettings {
   if (data.error) throw new Error(data.error);
   const result = { ...DEFAULT_SETTINGS };
   for (const key of keys) {
+    if (key === "connectionMode" && data[key] === undefined) continue; // legacy settings
     if (typeof data[key] !== typeof DEFAULT_SETTINGS[key]) throw new Error("Некорректные сохранённые настройки");
     Object.assign(result, { [key]: data[key] });
   }
+  if (result.connectionMode !== "vpn" && result.connectionMode !== "proxy") throw new Error("Некорректный режим подключения");
   return result;
 }
 
@@ -30,6 +32,7 @@ export function loadNetworkSettings(): NetworkSettings {
 
 export function saveNetworkSetting(key: keyof NetworkSettings, value: string | number | boolean): string {
   try {
+    if (key === "connectionMode" && value !== "vpn" && value !== "proxy") return "Ошибка: неизвестный режим подключения";
     const native = bridge();
     if (native) return native.setNetworkSetting?.(key, String(value)) ?? "Ошибка: Android-мост сохранения недоступен";
     if (key === "dnsPrimary" || key === "dnsSecondary") {

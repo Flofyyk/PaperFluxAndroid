@@ -7,6 +7,7 @@ import { InlineNumberField, InlineTextField } from "../components/settings/Inlin
 import { Switch } from "../components/ui/Switch";
 import { AppExceptionRow } from "../components/settings/AppExceptionRow";
 import { useToast } from "../hooks/useToast";
+import type { AppRoutingMode } from "../utils/appRouting";
 
 const APP_ROW_HEIGHT = 62;
 const APP_ROW_OVERSCAN = 5;
@@ -18,6 +19,8 @@ export const SettingsScreen = memo(function SettingsScreen({
   apps,
   onToggleApp,
   onReset,
+  routingMode,
+  onRoutingMode,
 }: {
   settings: VpnSettings;
   settingsError?: string;
@@ -25,6 +28,8 @@ export const SettingsScreen = memo(function SettingsScreen({
   apps: AppExceptionItem[];
   onToggleApp: (id: string, value: boolean) => string;
   onReset: () => string;
+  routingMode: AppRoutingMode;
+  onRoutingMode: (mode: AppRoutingMode) => string;
 }) {
   const { show } = useToast();
   const [appQuery, setAppQuery] = useState("");
@@ -45,6 +50,7 @@ export const SettingsScreen = memo(function SettingsScreen({
   const update = <K extends keyof VpnSettings,>(key: K, value: VpnSettings[K]) => {
     const error = onUpdate(key, value);
     if (error) show(error);
+    return error;
   };
 
   return (
@@ -53,6 +59,19 @@ export const SettingsScreen = memo(function SettingsScreen({
 
       <div className="flex flex-col gap-3.5 px-5 pb-8">
         {settingsError && <p role="alert" className="text-error">{settingsError}</p>}
+        <SettingsSection title="Режим подключения">
+          <div role="group" aria-label="VPN или прокси" className="grid grid-cols-2 gap-2 py-2">
+            {([ ["vpn", "VPN"], ["proxy", "Прокси"] ] as const).map(([mode, label]) =>
+              <button key={mode} type="button" aria-pressed={settings.connectionMode === mode}
+                onClick={() => update("connectionMode", mode)}
+                className={`min-h-11 rounded-xl px-3 py-2 text-[13px] font-semibold ${settings.connectionMode === mode ? "bg-primary text-on-primary" : "bg-surface-container text-on-surface"}`}>{label}</button>)}
+          </div>
+          <p className="py-2 text-[12px] leading-snug text-on-surface-variant">
+            {settings.connectionMode === "proxy" ? "SOCKS5: 127.0.0.1:1080, без логина и пароля. Укажите этот адрес в нужном приложении. Поддерживается TCP и DNS через прокси, без UDP и IPv6. Системный VPN не включается; остальной трафик идёт обычным путём. Если другое приложение создаёт VPN, исключите PaperFlux из него, чтобы избежать петли подключения." : "Создаётся системный VPN-интерфейс с настройками DNS, MTU и выбором приложений."}
+            {" "}Перед сменой режима отключите PaperFlux.
+          </p>
+        </SettingsSection>
+        {settings.connectionMode === "vpn" &&
         <SettingsSection title="Сеть">
           <p className="py-2 text-[12px] text-on-surface-variant">DNS и MTU сохраняются сразу и применяются после переподключения VPN.</p>
           <SettingRow
@@ -97,7 +116,7 @@ export const SettingsScreen = memo(function SettingsScreen({
               />
             }
           />
-        </SettingsSection>
+        </SettingsSection>}
 
         <SettingsSection title="Поведение">
           <button type="button" onClick={() => {
@@ -118,7 +137,7 @@ export const SettingsScreen = memo(function SettingsScreen({
           />
           <SettingRow
             title="Подключаться автоматически"
-            supporting="Запускать VPN сразу при открытии приложения"
+            supporting="Запускать выбранный режим сразу при открытии приложения"
             trailing={
               <Switch
                 checked={settings.autoConnect}
@@ -129,16 +148,23 @@ export const SettingsScreen = memo(function SettingsScreen({
           />
         </SettingsSection>
 
-        <SettingsSection title="Исключения приложений">
+        {settings.connectionMode === "vpn" && <SettingsSection title="Приложения и VPN">
+          <div role="group" aria-label="Режим приложений" className="mb-3 grid grid-cols-1 gap-2">
+            {([ ["exclude", "Все, кроме выбранных"], ["include", "Только выбранные через VPN"] ] as const).map(([mode, label]) =>
+              <button key={mode} type="button" aria-pressed={routingMode === mode} onClick={() => {
+                const result = onRoutingMode(mode); if (result) show(result);
+              }} className={`min-h-11 rounded-xl px-3 py-2 text-left text-[13px] font-semibold ${routingMode === mode ? "bg-primary text-on-primary" : "bg-surface-container text-on-surface"}`}>{label}</button>)}
+          </div>
           <p className="pb-2 pt-1 text-[12px] leading-snug text-on-surface-variant">
-            Выбранные приложения используют обычный интернет. Активный VPN кратко переподключится, чтобы применить изменения.
+            {routingMode === "include" ? "Только выбранные приложения используют VPN, остальные — обычный интернет. Выберите хотя бы одно приложение." : "Выбранные приложения используют обычный интернет, остальные — VPN."}
+            {" "}Активный VPN кратко переподключится, чтобы применить изменения. Списки двух режимов сохраняются отдельно.
           </p>
           <input value={appQuery} onChange={(e) => setAppQuery(e.target.value)} placeholder="Поиск приложений" className="mb-2 w-full rounded-xl bg-surface-container-high px-3.5 py-2.5 text-[13px] text-on-surface outline-none ring-1 ring-outline/30 placeholder:text-on-surface-variant focus:ring-primary/70" />
           <div ref={appList} onScroll={(event) => setAppScrollTop(event.currentTarget.scrollTop)} className="max-h-72 overflow-y-auto rounded-2xl bg-surface-container-low px-3 ring-1 ring-outline/20">
             {visibleApps.length ? (
               <div style={{ height: visibleApps.length * APP_ROW_HEIGHT }}>
                 <div style={{ transform: `translateY(${firstApp * APP_ROW_HEIGHT}px)` }}>
-                  {renderedApps.map((app) => <AppExceptionRow key={app.id} app={app} onToggle={(id, value) => {
+                  {renderedApps.map((app) => <AppExceptionRow key={app.id} app={app} include={routingMode === "include"} onToggle={(id, value) => {
                     const result = onToggleApp(id, value);
                     if (result) show(result);
                   }} />)}
@@ -146,7 +172,7 @@ export const SettingsScreen = memo(function SettingsScreen({
               </div>
             ) : <p className="py-5 text-center text-[12px] text-on-surface-variant">Приложения не найдены</p>}
           </div>
-        </SettingsSection>
+        </SettingsSection>}
 
         <button
           onClick={() => {

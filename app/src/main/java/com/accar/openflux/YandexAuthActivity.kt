@@ -44,6 +44,7 @@ class YandexAuthActivity : AppCompatActivity() {
     private var submittedAt = 0L
     private var submittedCookies: Map<String, String>? = null
     private var checkingPage = false
+    private var automaticRetries = 0
     private val checkHandler = android.os.Handler(android.os.Looper.getMainLooper())
     private val automaticResultCheck = object : Runnable {
         override fun run() {
@@ -53,8 +54,18 @@ class YandexAuthActivity : AppCompatActivity() {
                 if (live?.optString("requestId") != pending?.optString("requestId") || live?.optString("attempt") != pending?.optString("attempt")) {
                     finish(); return
                 }
+                if (YandexCheckPresentation.canReturnAfterHandoff(submitted, live?.optBoolean("submitted") == true,
+                        pageComplete, pageFailed, isCheckpoint(currentUrl))) {
+                    setStatus("Результат принят. Продолжаем подключение автоматически", Color.rgb(130, 220, 170))
+                    checkHandler.postDelayed({ if (!isFinishing) finish() }, 400)
+                    return
+                }
                 if (submitted && android.os.SystemClock.elapsedRealtime() - submittedAt >= 30_000 && !pageFailed) {
-                    setStatus("Документ ещё подключается. Можно повторно передать результат кнопкой ниже", Color.rgb(255, 213, 128))
+                    if (automaticRetries < 3) {
+                        automaticRetries++
+                        setStatus("Повторно передаём результат проверки…", Color.rgb(255, 213, 128))
+                        saveCookies(forceRetry = true)
+                    } else setStatus("Не удалось передать результат. Проверьте интернет или откройте страницу заново", Color.rgb(255, 177, 177))
                 }
             }
             val automaticHealthy = YandexCheckPresentation.canDismissForReadyTunnel(
@@ -118,6 +129,7 @@ class YandexAuthActivity : AppCompatActivity() {
             errorView?.visibility = View.GONE
             pageFailed = false
             submitted = false
+            automaticRetries = 0
             browser?.loadUrl(startUrl)
         }
         statusView = findViewById(R.id.auth_status)

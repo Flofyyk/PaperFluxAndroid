@@ -5,9 +5,11 @@ import { memo, useEffect, useRef, useState } from "react";
 export const AppExceptionRow = memo(function AppExceptionRow({
   app,
   onToggle,
+  include = false,
 }: {
   app: AppExceptionItem;
   onToggle: (id: string, value: boolean) => void;
+  include?: boolean;
 }) {
   const [icon, setIcon] = useState(app.icon ?? "");
   const row = useRef<HTMLDivElement>(null);
@@ -38,7 +40,7 @@ export const AppExceptionRow = memo(function AppExceptionRow({
         <p className="truncate text-[13px] font-semibold text-on-surface">{app.name}</p>
         <p className="truncate text-[11.5px] text-on-surface-variant">{app.pkg}</p>
       </div>
-      <Switch checked={app.excluded} onChange={(v) => onToggle(app.id, v)} aria-label={`Исключить ${app.name}`} />
+      <Switch checked={app.excluded} onChange={(v) => onToggle(app.id, v)} aria-label={`${include ? "Направлять через VPN" : "Исключить"} ${app.name}`} />
     </div>
   );
 });

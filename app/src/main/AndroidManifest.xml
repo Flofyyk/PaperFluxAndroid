@@ -36,5 +36,9 @@
             <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE" android:value="PaperFlux Yandex Docs transport"/>
         </service>
         <receiver android:name=".RestartReceiver" android:exported="false" />
+        <service android:name=".OpenFluxProxyService" android:exported="false" android:process=":vpn"
+            android:stopWithTask="false" android:foregroundServiceType="specialUse">
+            <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE" android:value="User-started local SOCKS5 document proxy"/>
+        </service>
     </application>
 </manifest>

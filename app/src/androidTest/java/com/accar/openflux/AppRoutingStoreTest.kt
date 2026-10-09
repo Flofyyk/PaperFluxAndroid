@@ -34,6 +34,15 @@ class AppRoutingStoreTest {
             writer.save(emptySet())
             assertTrue(reader.read().isEmpty())
             assertTrue(runCatching { AppRoutingStore.decode("[\"invalid/package\"]") }.isFailure)
+            saved.writeText("[\"app.legacy\"]")
+            assertEquals(AppRoutingConfig.EXCLUDE, reader.config().mode)
+            assertEquals(setOf("app.legacy"), reader.config().excluded)
+            writer.saveConfig(reader.config().copy(mode = AppRoutingConfig.INCLUDE, included = setOf("app.vpn")))
+            assertEquals(setOf("app.vpn"), reader.config().selected)
+            assertEquals(setOf("app.legacy"), reader.config().excluded)
+            writer.saveConfig(reader.config().copy(mode = AppRoutingConfig.EXCLUDE))
+            assertEquals(setOf("app.legacy"), reader.config().selected)
+            assertEquals(setOf("app.vpn"), reader.config().included)
         } finally {
             directory.listFiles()?.forEach { it.delete() }
             directory.delete()

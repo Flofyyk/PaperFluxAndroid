@@ -10,7 +10,7 @@ class RestartReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent?) {
         val prefs = context.getSharedPreferences(OpenFluxVpnService.PREFS, Context.MODE_PRIVATE)
         if (!prefs.getBoolean(OpenFluxVpnService.DESIRED_ACTIVE, false)) return
-        val service = Intent(context, OpenFluxVpnService::class.java).setAction(OpenFluxVpnService.START)
+        val service = ConnectionRuntime.intent(context, OpenFluxVpnService.START)
             .putExtra(OpenFluxVpnService.EXTRA_DOCUMENT_URL, prefs.getString("document", ""))
             .putExtra(OpenFluxVpnService.EXTRA_RESUME, true)
         runCatching { ContextCompat.startForegroundService(context, service) }

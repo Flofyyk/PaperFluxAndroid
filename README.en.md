@@ -18,7 +18,7 @@
 
 PaperFlux Android connects applications to a PaperFlux server through an encrypted document transport. A configured server and an access profile are required.
 
-The [0.4.28 release](https://github.com/Flofyyk/PaperFluxAndroid/releases/tag/v0.4.28) fixes DNS and network-settings persistence, adds a VPN quick-settings tile and GitHub update checks, improves VPN startup error handling, and updates transport labels and bottom navigation. It includes core `0.5.16` with Mail.ru connection and document-channel recovery fixes.
+The [0.4.29 release](https://github.com/Flofyyk/PaperFluxAndroid/releases/tag/v0.4.29) adds local SOCKS5 mode, VPN app inclusion lists, and a five-second connection-button cooldown. MTU editing and Yandex verification handoff are improved. It includes core `0.5.16-android.1` with standalone Android proxy support.
 
 Use a dedicated empty document for Mail.ru: editable links receive periodic editor changes. Read-only links are accepted without those changes; connectivity still depends on the document service.
 
@@ -88,15 +88,23 @@ Backup sets contain separate configurations for already deployed servers. Switch
 
 [Transport settings](https://github.com/Flofyyk/PaperFlux/blob/main/docs/TRANSPORTS.md) · [Backup servers](https://github.com/Flofyyk/PaperFlux/blob/main/docs/MULTIUSER.md)
 
-## App exclusions
+## VPN or proxy
 
-Select applications under Settings → App exclusions. The list is persisted and applied automatically with a brief VPN reconnect. Restart an excluded app if it retains existing connections.
+Choose VPN or Proxy under Settings → Connection mode, after stopping PaperFlux. Proxy mode listens only on `127.0.0.1:1080` without creating a system VPN. Configure SOCKS5, host `127.0.0.1`, port `1080`, and no credentials in the desired application. Only apps configured to use this proxy use the document channel.
+
+TCP and domain names with tunneled DNS are supported; UDP and IPv6 are not. If another app creates a VPN and uses PaperFlux as its upstream proxy, exclude PaperFlux from that VPN to avoid a routing loop. InviZible/Tor interoperability has not yet been tested on a phone.
+
+## VPN app selection
+
+Under Settings → Apps and VPN, choose all apps except selected ones, or only selected apps through VPN. Each mode retains its own list; changes apply with a brief reconnect. Inclusion mode requires at least one installed app. Restart an app if it retains old connections. These routing settings do not apply in proxy mode.
 
 Exclusions route traffic outside the tunnel but do not hide the system-wide presence of a VPN.
 
 ## Settings and updates
 
 DNS and MTU persist across app restarts and apply on the next VPN connection. The document transport's bootstrap DNS remains separate from the DNS used by apps inside the tunnel.
+
+The main connection button has a five-second countdown after each command. Starting a new session also waits for the previous session to finish stopping.
 
 The PaperFlux tile is available in the system quick-settings editor. Move it to your active tiles manually; there is no separate in-app add button.
 

@@ -46,10 +46,11 @@ class NetworkSettingsStore(private val context: Context) {
 
     companion object {
         private val lock = Any()
-        private val keys = listOf("dnsPrimary", "dnsSecondary", "mtu", "connectTimeoutSec", "autoReconnect", "autoConnect")
+        private val keys = listOf("dnsPrimary", "dnsSecondary", "mtu", "connectTimeoutSec", "autoReconnect", "autoConnect", "connectionMode")
         fun json(settings: NetworkSettings): JSONObject = JSONObject()
             .put("dnsPrimary", settings.dnsPrimary).put("dnsSecondary", settings.dnsSecondary)
             .put("mtu", settings.mtu).put("connectTimeoutSec", settings.connectTimeoutSec)
             .put("autoReconnect", settings.autoReconnect).put("autoConnect", settings.autoConnect)
+            .put("connectionMode", settings.connectionMode)
     }
 }

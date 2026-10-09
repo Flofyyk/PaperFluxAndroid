@@ -10,9 +10,9 @@ export function transportPresentation(profile?: PaperFluxProfile) {
   }
 }
 
-export function transportStages(stages: Stage[], profile?: PaperFluxProfile): Stage[] {
+export function transportStages(stages: Stage[], profile?: PaperFluxProfile, mode: "vpn" | "proxy" = "vpn"): Stage[] {
   const { label } = transportPresentation(profile);
-  return stages.map(stage => stage.id === "transport"
+  return stages.map(stage => mode === "proxy" && stage.id === "vpn" ? { ...stage, title: "Локальный SOCKS5", description: "127.0.0.1:1080, без системного VPN-интерфейса" } : stage.id === "transport"
     ? { ...stage, title: profile ? label : "Документный канал", description: `Установка защищённого соединения через ${label}` }
     : stage);
 }

@@ -4,6 +4,14 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class YandexCheckPresentationTest {
+    @Test fun returnToAppNeedsNativeHandoffNotJustDocumentLoad() {
+        assertTrue(YandexCheckPresentation.canReturnAfterHandoff(true, true, true, false, false))
+        assertFalse(YandexCheckPresentation.canReturnAfterHandoff(false, true, true, false, false))
+        assertFalse(YandexCheckPresentation.canReturnAfterHandoff(true, false, true, false, false))
+        assertFalse(YandexCheckPresentation.canReturnAfterHandoff(true, true, false, false, false))
+        assertFalse(YandexCheckPresentation.canReturnAfterHandoff(true, true, true, true, false))
+        assertFalse(YandexCheckPresentation.canReturnAfterHandoff(true, true, true, false, true))
+    }
     @Test fun bothVerificationPhrasesAndCookieDeliveryAreWarnings() {
         for (message in listOf("Яндекс: требуется проверка — документ 2, телефон",
             "Яндекс требует подтверждение доступа на сервере",

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { validNumberDraft } from "../../utils/numberDraft";
 
 export function InlineNumberField({
   value,
@@ -9,23 +10,33 @@ export function InlineNumberField({
   width = "w-20",
 }: {
   value: number;
-  onChange: (v: number) => void;
+  onChange: (v: number) => string;
   suffix?: string;
   min?: number;
   max?: number;
   width?: string;
 }) {
+  const [draft, setDraft] = useState(String(value));
+  const focused = useRef(false);
+  useEffect(() => { if (!focused.current) setDraft(String(value)); }, [value]);
+  const finish = () => { focused.current = false; setDraft(String(value)); };
   return (
     <div className="flex items-center gap-1.5 rounded-xl border border-outline-variant bg-surface px-3 py-1.5">
       <input
         type="number"
-        value={value}
+        value={draft}
         min={min}
         max={max}
         onChange={(e) => {
-          const v = Number(e.target.value);
-          if (!Number.isNaN(v)) onChange(Math.min(max, Math.max(min, v)));
+          const raw = e.target.value;
+          setDraft(raw);
+          const next = validNumberDraft(raw, min, max);
+          if (next !== null) onChange(next);
         }}
+        onFocus={() => { focused.current = true; }}
+        onBlur={finish}
+        onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); }}
+        inputMode="numeric"
         className={`${width} bg-transparent text-right text-[13px] font-bold text-on-surface outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none`}
       />
       {suffix && <span className="text-[12px] font-medium text-on-surface-variant">{suffix}</span>}

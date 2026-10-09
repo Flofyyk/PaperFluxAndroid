@@ -4,6 +4,8 @@ import { DEFAULT_APPS, DEFAULT_SETTINGS } from "./data/defaults";
 import { useVpn } from "./hooks/useVpn";
 import { ToastProvider } from "./hooks/useToast";
 import { loadNetworkSettings, saveNetworkSetting, resetNetworkSettings } from "./utils/networkSettings";
+import { emptyRouting, loadAppRouting, saveAppRouting } from "./utils/appRouting";
+import type { AppRouting, AppRoutingMode } from "./utils/appRouting";
 
 import { BottomNav } from "./components/shell/BottomNav";
 import { AppUpdateDialog } from "./components/shell/AppUpdateDialog";
@@ -23,6 +25,19 @@ export default function App() {
   const [settingsError, setSettingsError] = useState("");
   const [apps, setApps] = useState<AppExceptionItem[]>(DEFAULT_APPS);
   const appsRef = useRef<AppExceptionItem[]>(DEFAULT_APPS);
+  const routingRef = useRef<AppRouting>(emptyRouting());
+  const [routingMode, setRoutingMode] = useState<AppRoutingMode>("exclude");
+  const applyRouting = useCallback((routing: AppRouting) => {
+    routingRef.current = routing;
+    setRoutingMode(routing.mode);
+    const selected = new Set(routing.mode === "include" ? routing.included : routing.excluded);
+    const next = appsRef.current.map(app => ({ ...app, excluded: selected.has(app.pkg) }));
+    appsRef.current = next; setApps(next);
+  }, []);
+  useEffect(() => {
+    try { applyRouting(loadAppRouting()); }
+    catch (error) { setSettingsError(error instanceof Error ? error.message : "Не удалось прочитать режим приложений"); }
+  }, [applyRouting]);
   const [profiles, setProfiles] = useState<PaperFluxProfile[]>([]);
   const [activeProfile, setActiveProfile] = useState("");
   const [inspections, setInspections] = useState<Record<string, Inspection>>({});
@@ -128,28 +143,37 @@ export default function App() {
   }, []);
 
   const toggleApp = useCallback((id: string, value: boolean): string => {
-    const next = appsRef.current.map((a) => (a.id === id ? { ...a, excluded: value } : a));
-    const native = (window as unknown as { PaperFluxNative?: { setExcludedApps?: (raw: string) => string } }).PaperFluxNative;
-    const result = native?.setExcludedApps?.(JSON.stringify(next.filter((a) => a.excluded).map((a) => a.pkg))) ?? "";
+    const pkg = appsRef.current.find(app => app.id === id)?.pkg;
+    if (!pkg) return "Ошибка: приложение не найдено";
+    const current = routingRef.current;
+    const key = current.mode === "include" ? "included" : "excluded";
+    const packages = new Set(current[key]);
+    if (value) packages.add(pkg); else packages.delete(pkg);
+    const next = { ...current, [key]: [...packages].sort() };
+    const result = saveAppRouting(next);
     if (result.startsWith("Ошибка")) return result;
-    appsRef.current = next;
-    setApps(next);
+    applyRouting(next);
     return result;
-  }, []);
+  }, [applyRouting]);
+
+  const changeRoutingMode = useCallback((mode: AppRoutingMode) => {
+    const next = { ...routingRef.current, mode };
+    const error = saveAppRouting(next);
+    if (error.startsWith("Ошибка")) return error;
+    applyRouting(next);
+    return "Режим приложений сохранён";
+  }, [applyRouting]);
 
   const resetSettings = useCallback(() => {
     const error = resetNetworkSettings();
     if (error) return error;
     setSettings(previous => ({ ...DEFAULT_SETTINGS, documentUrl: previous.documentUrl }));
     setSettingsError("");
-    const native = (window as unknown as { PaperFluxNative?: { setExcludedApps?: (raw: string) => string } }).PaperFluxNative;
-    const result = native?.setExcludedApps?.("[]") ?? "";
+    const result = saveAppRouting(emptyRouting());
     if (result.startsWith("Ошибка")) return result;
-    const next = appsRef.current.map(app => ({ ...app, excluded: false }));
-    appsRef.current = next;
-    setApps(next);
+    applyRouting(emptyRouting());
     return "";
-  }, []);
+  }, [applyRouting]);
 
   const handleToggleConnection = useCallback(() => {
     if (vpn.status === "idle" || vpn.status === "error") {
@@ -179,6 +203,10 @@ export default function App() {
                 onOpenProfiles={() => setActiveTab("profiles")}
                 onToggleConnection={handleToggleConnection}
                 onRetry={vpn.retry}
+                cooldownSeconds={vpn.cooldownSeconds}
+                controlDisabled={vpn.controlDisabled}
+                disconnecting={vpn.disconnecting}
+                connectionMode={settings.connectionMode}
               />
             )}
             {activeTab === "logs" && <LogsScreen logs={vpn.logs} onClear={vpn.clearLogs} />}
@@ -190,6 +218,8 @@ export default function App() {
                 onUpdate={updateSetting}
                 apps={apps}
                 onToggleApp={toggleApp}
+                routingMode={routingMode}
+                onRoutingMode={changeRoutingMode}
                 onReset={resetSettings}
               />
             )}

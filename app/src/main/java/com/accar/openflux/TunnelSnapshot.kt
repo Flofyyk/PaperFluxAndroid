@@ -40,7 +40,7 @@ object TunnelSnapshot {
     }
     fun read(context: Context): JSONObject = runCatching {
         val data = JSONObject(String(AtomicFile(File(context.noBackupFilesDir, "tunnel-state.json")).readFully()))
-        val alive = context.getSystemService(android.app.ActivityManager::class.java)?.runningAppProcesses?.any { it.processName == "${context.packageName}:vpn" } == true
+        val alive = ConnectionRuntime.running(context)
         if (!alive && data.optString("state") != "ERROR") {
             data.put("state", "DISCONNECTED").put("detail", "Туннель отключён")
         }

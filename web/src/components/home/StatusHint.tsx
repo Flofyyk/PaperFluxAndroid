@@ -26,11 +26,12 @@ const color: Record<ConnectionStatus, string> = {
   reconnecting: "text-warning",
 };
 
-export const StatusHint = memo(function StatusHint({ status }: { status: ConnectionStatus }) {
+export const StatusHint = memo(function StatusHint({ status, proxy = false }: { status: ConnectionStatus; proxy?: boolean }) {
+  const subtitle = proxy && status === "connected" ? "Локальный SOCKS5 готов, системный VPN не включён" : sub[status];
   return (
     <div key={status} className="pf-fade-up flex flex-col items-center gap-1 text-center">
       <span className={cn("text-[19px] font-extrabold tracking-tight", color[status])}>{text[status]}</span>
-      {sub[status] && <span className="text-[12.5px] font-medium text-on-surface-variant">{sub[status]}</span>}
+      {subtitle && <span className="text-[12.5px] font-medium text-on-surface-variant">{subtitle}</span>}
     </div>
   );
 });
