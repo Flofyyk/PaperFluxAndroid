@@ -171,10 +171,21 @@ class AuthRequestQueueTest {
         assertNull(queue.submitted("stale"))
         assertTrue(queue.submitted("check")!!.optBoolean("submitted"))
         queue.accept(request("check", false))
-        assertTrue(queue.current()!!.optBoolean("submitted"))
-        assertEquals("check", queue.current()!!.getString("requestId"))
-        queue.acknowledge("check")
         assertEquals("next", queue.current()!!.getString("requestId"))
+        queue.acknowledge("next")
+        assertEquals("check", queue.current()!!.getString("requestId"))
+        assertTrue(queue.current()!!.optBoolean("submitted"))
+        queue.acknowledge("check")
+        assertNull(queue.current())
+    }
+    @Test fun freshRequestPreemptsSubmittedButDoesNotAcknowledgeIt() {
+        val queue = AuthRequestQueue()
+        queue.accept(request("waiting", false))
+        queue.submitted("waiting")
+        assertTrue(queue.accept(request("fresh", true)))
+        assertEquals("fresh", queue.current()!!.getString("requestId"))
+        queue.acknowledge("fresh")
+        assertEquals("waiting", queue.current()!!.getString("requestId"))
     }
     @Test fun onePhoneServerDocumentPairHasPriorityOverEveryLocalDocument() {
         val queue = AuthRequestQueue()

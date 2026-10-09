@@ -329,6 +329,8 @@ open class OpenFluxVpnService : VpnService() {
             process = ProcessBuilder(command).apply {
                 directory(filesDir); redirectErrorStream(true)
                 environment()["LD_LIBRARY_PATH"] = applicationInfo.nativeLibraryDir
+                environment()["PAPERFLUX_DNS_PRIMARY"] = networkSettings.dnsPrimary
+                environment()["PAPERFLUX_DNS_SECONDARY"] = networkSettings.dnsSecondary
                 environment()["PAPERFLUX_SESSION_COOKIES"] = File(noBackupFilesDir, "session-cookies-$cookieNamespace.json").absolutePath
                 if (provider in setOf("yandex", "vyandex", "mailru")) {
                     environment()["PAPERFLUX_TCP_RECOVERY"] = "classic"
@@ -365,9 +367,9 @@ open class OpenFluxVpnService : VpnService() {
             Thread {
                 try {
                     child.inputStream.bufferedReader().useLines { lines ->
-                        lines.forEach {
+                        lines.forEach { line ->
                             if (process !== child || !current()) return@forEach
-                            val safe = redactNativeLog(it)
+                            val safe = redactNativeLog(line)
                             if (safe.contains("CAPTCHA challenge") || safe.contains("YANDEX_LOGIN_REQUIRED")) {
                                 authActionRequired = "Яндекс требует подтверждение доступа к документу"
                             } else if (safe.contains("YANDEX_VOLGA_REQUIRED")) {
@@ -377,6 +379,9 @@ open class OpenFluxVpnService : VpnService() {
                             // Stats are consumed by the UI but do not need to
                             // be written to Logcat on every native tick.
                             if (statsMatch == null) Log.i("OpenFluxNative", safe)
+                            // Parse only the whitelisted fields before the general
+                            // redactor removes resolver IPs. Never publish raw lines.
+                            TunnelHealthDiagnostics.message(line)?.let { publishEvent("[DNS] $it") }
                             if (provider == "mailru") MailruConnectionDiagnostics.message(safe)?.let { detail ->
                                 publishEvent("[TRANSPORT] $detail")
                             }
@@ -465,8 +470,9 @@ open class OpenFluxVpnService : VpnService() {
             if (NativeAuthBridge.read(File(noBackupFilesDir, "auth-request.json")) == null) authActionRequired = null
             if (!proxyMode) sendTunFd(socketName, tun!!)
             publish("DNS", "Проверяем DNS и TCP через защищённый канал")
-            val tunnelDeadline = System.currentTimeMillis() + 35_000
-            while (current() && (!nativeTunnelReady || (proxyMode && !nativeProxyListening)) && child.isAlive && System.currentTimeMillis() < tunnelDeadline) Thread.sleep(200)
+            val tunnelBudget = ConnectionWaitBudget(android.os.SystemClock.elapsedRealtime(), 60_000L)
+            while (current() && (!nativeTunnelReady || (proxyMode && !nativeProxyListening)) && child.isAlive &&
+                !tunnelBudget.expired(android.os.SystemClock.elapsedRealtime(), hasPendingVerification())) Thread.sleep(200)
             if (!current()) return
             check(child.isAlive) { "Нативный транспорт завершился во время подключения" }
             check(nativeTunnelReady) { "Защищённый канал создан, но доступ к интернету пока не подтверждён" }
@@ -830,9 +836,15 @@ open class OpenFluxVpnService : VpnService() {
     private fun scheduleFullRecovery(reason: String) {
         if (!fullRecoveryScheduled.compareAndSet(false, true)) return
         val generation = recoveryGeneration.incrementAndGet()
+        val budget = ConnectionWaitBudget(android.os.SystemClock.elapsedRealtime(), 20_000L)
+        fun scheduleCheck() {
         fullRecoveryFuture = reconnectWorker.schedule({
-            fullRecoveryScheduled.set(false)
             if (generation == recoveryGeneration.get() && wantsConnection() && autoReconnectEnabled() && !nativeTunnelReady) {
+                if (!budget.expired(android.os.SystemClock.elapsedRealtime(), hasPendingVerification())) {
+                    scheduleCheck()
+                    return@schedule
+                }
+                fullRecoveryScheduled.set(false)
                 recordServerFailure(definitive = true)
                 val replacement = sessionGeneration.incrementAndGet()
                 releaseTunnelResources(keepTun = keepVpnDuringFailover())
@@ -846,8 +858,15 @@ open class OpenFluxVpnService : VpnService() {
                         scheduleReconnect(reason, immediate = true)
                     }
                 }
-            }
-        }, 20, TimeUnit.SECONDS)
+            } else if (generation == recoveryGeneration.get()) fullRecoveryScheduled.set(false)
+        }, 1, TimeUnit.SECONDS)
+        }
+        scheduleCheck()
+    }
+    private fun hasPendingVerification(): Boolean {
+        val request = NativeAuthBridge.read(File(noBackupFilesDir, "auth-request.json")) ?: return false
+        return request.optString("requestId").isNotBlank() &&
+            System.currentTimeMillis() - request.optLong("created") in 0L..1_800_000L
     }
     private fun recordServerFailure(definitive: Boolean = false) {
         // Losing Wi-Fi or waiting for a user CAPTCHA is not an unhealthy VPS.
@@ -897,6 +916,8 @@ open class OpenFluxVpnService : VpnService() {
         val message = error.message.orEmpty()
         val lower = message.lowercase()
         return when {
+            message == "Защищённый канал создан, но доступ к интернету пока не подтверждён" ->
+                "Документ подключён, но DNS/TCP через VPS не отвечает. Подробности — в журнале DNS"
             "access_network_state" in lower -> "Приложение: нет доступа к состоянию сети Android"
             "internet недоступен" in lower || "активного подключения" in lower -> message
             "permission" in lower || "vpn" in lower -> "VPN: нет разрешения Android"

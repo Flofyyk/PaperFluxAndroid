@@ -5,6 +5,7 @@ internal object MailruConnectionDiagnostics {
     fun message(line: String): String? {
         val event = line.substringAfter("[M-DOCS] ", "")
         return when {
+            event == "receive timeout; reconnecting document channel" -> "Mail.ru перестал отвечать; восстанавливаем документный канал"
             event == "cannot open the document; retrying" -> "Mail.ru не открыл документ. Проверьте публичную ссылку и доступ к документу; повторяем попытку"
             event.startsWith("WebSocket dial failed (http ") -> "Не удалось соединиться с редактором Mail.ru; повторяем попытку"
             event == "Socket.IO handshake failed; retrying" -> "Mail.ru не завершил начальное соединение; повторяем попытку"

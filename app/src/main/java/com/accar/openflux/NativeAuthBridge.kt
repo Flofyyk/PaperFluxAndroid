@@ -16,21 +16,21 @@ import java.security.MessageDigest
 internal class AuthRequestQueue {
     private val requests = LinkedHashMap<String, JSONObject>()
     private val completed = LinkedHashSet<String>()
-    fun current(): JSONObject? = requests.values.firstOrNull()
+    fun current(): JSONObject? = requests.values.firstOrNull { !it.optBoolean("submitted") } ?: requests.values.firstOrNull()
     fun accept(request: JSONObject): Boolean {
         val id = request.optString("requestId")
         if (id.isEmpty() || id in completed) return false
-        val empty = requests.isEmpty()
+        val previous = current()?.optString("requestId")
         if (requests.containsKey(id) || requests.size < 8) {
             if (requests[id]?.optBoolean("submitted") == true) {
                 request.put("submitted", true).put("submittedAt", requests[id]!!.optLong("submittedAt"))
             }
             requests[id] = request
         }
-        return empty && requests.isNotEmpty()
+        return previous != current()?.optString("requestId")
     }
     fun acknowledge(id: String): Boolean {
-        val active = requests.keys.firstOrNull() == id
+        val active = current()?.optString("requestId") == id
         val finished = requests[id]
         requests.remove(id)
         // Prefer completing one phone/VPS document pair over opening every
@@ -241,9 +241,9 @@ object NativeAuthBridge {
                             } else if (line.startsWith("AUTH_SUBMITTED:")) synchronized(lock) {
                                 val id = line.removePrefix("AUTH_SUBMITTED:")
                                 val request = queue.submitted(id)
-                                if (request != null && queue.current()?.optString("requestId") == id) {
-                                    write(requestFile, request); onRequest(request)
-                                }
+                                // Submitted is not accepted. Keep it pending,
+                                // but let other documents be verified meanwhile.
+                                if (request != null) displayNext()
                             }
                         }
                     }

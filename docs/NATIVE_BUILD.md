@@ -1,15 +1,15 @@
-# Native core for Android 0.4.29
+# Native core for Android 0.4.30
 
-Bundled version: `0.5.16-android.1`.
+Bundled version: `0.5.17`.
 
-Source: [PaperFlux commit 98fc96ac20cb7e38c737771276f5f70ba4280e4b](https://github.com/Flofyyk/PaperFlux/tree/98fc96ac20cb7e38c737771276f5f70ba4280e4b).
+Source: [PaperFlux commit 2cad723166c9ed087e417c9c26685284c3b76a72](https://github.com/Flofyyk/PaperFlux/tree/2cad723166c9ed087e417c9c26685284c3b76a72).
 
-The standalone Android proxy adds no server protocol changes. Existing compatible Session servers do not require an update for this client release.
+The Session protocol is unchanged. Updating both ends is recommended so the Mail.ru read watchdog also runs on the server.
 
 Build all four Android ABI binaries from that source using Go 1.26.4+ and Android NDK 27.0.12077973+:
 
 ```powershell
-.\scripts\build-android-native.ps1 -NdkPath '<NDK path>' -AndroidProject '<Android checkout>' -Version '0.5.16-android.1'
+.\scripts\build-android-native.ps1 -NdkPath '<NDK path>' -AndroidProject '<Android checkout>' -Version '0.5.17'
 ```
 
 Then build the Android release with JDK 17+ and SDK 35:
