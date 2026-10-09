@@ -4,6 +4,14 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class MailruConnectionDiagnosticsTest {
+    @Test fun verificationStatusShowsOnlySafeDetails() {
+        assertEquals("Mail.ru пока не подтвердил доступ. Следующая попытка через 60 с",
+            MailruConnectionDiagnostics.message("[M-DOCS] browser verification limited; retry in 60 seconds"))
+        val passed = MailruConnectionDiagnostics.message("[M-DOCS] browser verification completed; retrying document request")!!
+        assertTrue(passed.contains("автоматически"))
+        assertFalse(passed.contains("VPN подключён"))
+        assertNull(MailruConnectionDiagnostics.message("[M-DOCS] browser verification limited; retry in 60 seconds private-token"))
+    }
     @Test fun failuresReachJournalWithoutPrivateDetails() {
         for (event in listOf(
             "cannot open the document; retrying", "WebSocket dial failed (http 403); retrying",
