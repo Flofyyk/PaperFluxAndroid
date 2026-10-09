@@ -18,7 +18,7 @@
 
 PaperFlux Android connects applications to a PaperFlux server through an encrypted document transport. A configured server and an access profile are required.
 
-The [0.4.29 release](https://github.com/Flofyyk/PaperFluxAndroid/releases/tag/v0.4.29) adds local SOCKS5 mode, VPN app inclusion lists, and a five-second connection-button cooldown. MTU editing and Yandex verification handoff are improved. It includes core `0.5.16-android.1` with standalone Android proxy support.
+The [0.4.29 release](https://github.com/Flofyyk/PaperFluxAndroid/releases/tag/v0.4.29) adds local SOCKS5 mode and VPN app inclusion lists. MTU editing and Yandex verification handoff are improved. It includes core `0.5.16-android.1` with standalone Android proxy support.
 
 Use a dedicated empty document for Mail.ru: editable links receive periodic editor changes. Read-only links are accepted without those changes; connectivity still depends on the document service.
 
@@ -104,7 +104,7 @@ Exclusions route traffic outside the tunnel but do not hide the system-wide pres
 
 DNS and MTU persist across app restarts and apply on the next VPN connection. The document transport's bootstrap DNS remains separate from the DNS used by apps inside the tunnel.
 
-The main connection button has a five-second countdown after each command. Starting a new session also waits for the previous session to finish stopping.
+Starting a new session waits for the previous session to finish stopping, without an additional delay.
 
 The PaperFlux tile is available in the system quick-settings editor. Move it to your active tiles manually; there is no separate in-app add button.
 

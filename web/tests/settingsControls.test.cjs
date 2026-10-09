@@ -71,20 +71,23 @@ test('invalid drafts and a failed save cannot overwrite the accepted number', ()
   input().props.onBlur(); assert.equal(input().props.value, '1400');
 });
 
-test('five-second command cooldown survives recreation and rejects repeated clicks', () => {
-  const { VpnCommandGuard } = load('../src/utils/vpnCommandGuard.ts');
-  let saved = null;
-  const create = () => new VpnCommandGuard(() => saved, value => { saved = value; });
-  const guard = create();
-  assert.equal(guard.claim(10000), true);
-  for (let i = 0; i < 100; i++) assert.equal(guard.claim(10000 + i), false);
-  assert.equal(create().remaining(14000), 1000);
-  assert.equal(create().claim(14999), false);
-  assert.equal(create().claim(15000), true);
-  saved = '99999999999999'; assert.equal(create().remaining(20000), 0);
+test('connect can be cancelled immediately and ignores the old stored cooldown', () => {
+  const h = hooks(); let starts = 0; let stops = 0;
+  const window = { localStorage: { getItem: () => String(Date.now() + 5000), setItem: () => {} },
+    setInterval: () => 1, clearInterval: () => {}, PaperFluxNative: {
+      getState: () => JSON.stringify({ state: 'DISCONNECTED' }), getSessionLogs: () => '{}',
+      connect: () => starts++, disconnect: () => stops++,
+    } };
+  const { useVpn } = load('../src/hooks/useVpn.ts', { react: h.react, window });
+  const hook = () => h.render(() => useVpn({ autoReconnect: true, timeoutSec: 15 }));
+  for (let i = 0; i < 100; i++) hook().connect();
+  assert.equal(starts, 1);
+  assert.equal(hook().controlDisabled, false);
+  hook().disconnect();
+  assert.equal(stops, 1);
 });
 
-test('real VPN hook sends one STOP and cannot START before stop confirmation even after five seconds', () => {
+test('real VPN hook rejects duplicate STOP but can START immediately after stop confirmation', () => {
   const h = hooks(); let now = 10000; let stops = 0; let starts = 0;
   const saved = new Map();
   const window = { localStorage: { getItem: k => saved.get(k) ?? null, setItem: (k, v) => saved.set(k, v) },
@@ -98,8 +101,11 @@ test('real VPN hook sends one STOP and cannot START before stop confirmation eve
   const vpn = hook();
   for (let i = 0; i < 100; i++) vpn.disconnect();
   assert.equal(stops, 1);
-  now = 16000; hook().connect(); assert.equal(starts, 0);
+  hook().connect(); assert.equal(starts, 0);
+  assert.equal(hook().controlDisabled, true);
   window.__paperFluxOnState(JSON.stringify({ state: 'DISCONNECTED' }));
+  assert.equal(now, 10000);
+  assert.equal(hook().controlDisabled, false);
   for (let i = 0; i < 100; i++) hook().connect();
   assert.equal(starts, 1);
 });
@@ -120,12 +126,14 @@ test('routing mode and both lists persist; native errors do not fall back to bro
   assert.equal(saved.mode, 'include');
 });
 
-test('the actual connection button is disabled and renders the countdown', () => {
+test('the actual connection button has no countdown and is enabled unless stopping', () => {
   const React = require('react');
   const { renderToStaticMarkup } = require('react-dom/server');
   const { ConnectButton } = load('../src/components/home/ConnectButton.tsx');
-  const html = renderToStaticMarkup(React.createElement(ConnectButton, { status: 'idle', onPress: () => {}, disabled: true, cooldownSeconds: 5 }));
+  const html = renderToStaticMarkup(React.createElement(ConnectButton, { status: 'idle', onPress: () => {}, disabled: true }));
   assert.match(html, /disabled=""/);
-  assert.match(html, /Подождите 5 сек/);
-  assert.match(html, />5<\/span>/);
+  assert.match(html, /<svg/);
+  assert.doesNotMatch(html, /Подождите|>5<\/span>/);
+  const ready = renderToStaticMarkup(React.createElement(ConnectButton, { status: 'idle', onPress: () => {} }));
+  assert.doesNotMatch(ready, /disabled=""/);
 });

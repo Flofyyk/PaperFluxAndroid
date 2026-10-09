@@ -203,7 +203,6 @@ export default function App() {
                 onOpenProfiles={() => setActiveTab("profiles")}
                 onToggleConnection={handleToggleConnection}
                 onRetry={vpn.retry}
-                cooldownSeconds={vpn.cooldownSeconds}
                 controlDisabled={vpn.controlDisabled}
                 disconnecting={vpn.disconnecting}
                 connectionMode={settings.connectionMode}

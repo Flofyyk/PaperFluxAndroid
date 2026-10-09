@@ -22,7 +22,6 @@ export function HomeScreen({
   onOpenProfiles,
   onToggleConnection,
   onRetry,
-  cooldownSeconds,
   controlDisabled,
   disconnecting,
   connectionMode,
@@ -37,7 +36,6 @@ export function HomeScreen({
   onOpenProfiles: () => void;
   onToggleConnection: () => void;
   onRetry: () => void;
-  cooldownSeconds: number;
   controlDisabled: boolean;
   disconnecting: boolean;
   connectionMode: "vpn" | "proxy";
@@ -52,9 +50,8 @@ export function HomeScreen({
         <div className="flex flex-col items-center gap-3 px-5 pb-6 pt-4">
           <ActiveProfileCard profile={profile} onOpenProfiles={onOpenProfiles} />
           {connectionMode === "proxy" && <p className="text-center text-[13px] font-semibold text-primary">SOCKS5 · 127.0.0.1:1080 · без системного VPN</p>}
-          <ConnectButton status={status} onPress={onToggleConnection} disabled={controlDisabled} cooldownSeconds={cooldownSeconds} />
-          {disconnecting ? <p role="status" className="text-sm text-on-surface-variant">Отключаем {connectionMode === "proxy" ? "прокси" : "VPN"}…</p> : cooldownSeconds > 0 ?
-            <p role="status" className="text-sm text-on-surface-variant">Кнопка станет доступна через {cooldownSeconds} сек.</p> : <StatusHint status={status} proxy={connectionMode === "proxy"} />}
+          <ConnectButton status={status} onPress={onToggleConnection} disabled={controlDisabled} />
+          {disconnecting ? <p role="status" className="text-sm text-on-surface-variant">Отключаем {connectionMode === "proxy" ? "прокси" : "VPN"}…</p> : <StatusHint status={status} proxy={connectionMode === "proxy"} />}
           <StatsGrid stats={stats} active={active} />
           {verification && !active && <div className="w-full"><VerificationCard verification={verification} onOpen={onOpenVerification} /></div>}
         </div>

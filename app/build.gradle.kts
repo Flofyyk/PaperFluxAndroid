@@ -5,7 +5,7 @@ android { namespace = "com.accar.openflux"; compileSdk = 35
         applicationId = "com.accar.openflux"
         minSdk = 26
         targetSdk = 35
-        versionCode = providers.gradleProperty("candidateVersionCode").orElse("49").get().toInt()
+        versionCode = providers.gradleProperty("candidateVersionCode").orElse("50").get().toInt()
         versionName = providers.gradleProperty("candidateVersionName").orElse("0.4.29").get()
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         ndk { abiFilters += listOf("armeabi-v7a", "arm64-v8a", "x86", "x86_64") }

@@ -40,12 +40,10 @@ export const ConnectButton = memo(function ConnectButton({
   status,
   onPress,
   disabled = false,
-  cooldownSeconds = 0,
 }: {
   status: ConnectionStatus;
   onPress: () => void;
   disabled?: boolean;
-  cooldownSeconds?: number;
 }) {
   const p = palette[status];
   const busy = status === "connecting" || status === "reconnecting";
@@ -77,7 +75,7 @@ export const ConnectButton = memo(function ConnectButton({
       <button
         onClick={onPress}
         disabled={disabled}
-        aria-label={cooldownSeconds > 0 ? `Подождите ${cooldownSeconds} сек.` : "Переключить подключение"}
+        aria-label="Переключить подключение"
         className={cn(
           "relative flex h-40 w-40 items-center justify-center rounded-full ring-8 transition-all duration-500 ease-out @[420px]:h-48 @[420px]:w-48",
           p.ring,
@@ -88,7 +86,7 @@ export const ConnectButton = memo(function ConnectButton({
           backgroundImage: `radial-gradient(circle at 32% 26%, ${p.from}, ${p.to})`,
         }}
       >
-        {cooldownSeconds > 0 ? <span aria-live="off" className="text-5xl font-bold text-white">{cooldownSeconds}</span> : <span key={status} className="pf-icon-swap flex items-center justify-center">
+        <span key={status} className="pf-icon-swap flex items-center justify-center">
             {status === "idle" && <Shield className="h-16 w-16 text-white" strokeWidth={1.8} />}
             {status === "connecting" && (
               <RotateCw className="pf-spin h-14 w-14 text-white" strokeWidth={1.8} />
@@ -102,7 +100,7 @@ export const ConnectButton = memo(function ConnectButton({
             {status === "reconnecting" && (
               <RotateCw className="pf-spin h-14 w-14 text-white" strokeWidth={1.8} />
             )}
-        </span>}
+        </span>
       </button>
     </div>
   );

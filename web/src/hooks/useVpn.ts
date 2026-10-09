@@ -3,7 +3,6 @@ import type { ConnectionStatus, LogCategory, LogEntry, LogLevel, SessionStats, S
 import { nowTime, uid } from "../utils/format";
 import { detailLevel, isVerificationWarning, readVerification } from "../utils/verification";
 import type { VerificationState } from "../utils/verification";
-import { VpnCommandGuard } from "../utils/vpnCommandGuard";
 
 const STAGES: Omit<Stage, "status">[] = [
   { id: "vpn", title: "VPN-интерфейс", description: "Создание системного туннеля устройства" },
@@ -21,18 +20,9 @@ export function useVpn(_opts: { autoReconnect: boolean; timeoutSec: number }) {
   const [verification, setVerification] = useState<VerificationState | null>(null);
   const [stats, setStats] = useState<SessionStats>({ durationSec: 0, ping: null, rxBytes: 0, txBytes: 0, rxRate: 0, txRate: 0 });
   const durationTimer = useRef<number | null>(null);
-  const control = useRef(new VpnCommandGuard(
-    () => window.localStorage.getItem("paperflux.vpn-control-until"),
-    value => window.localStorage.setItem("paperflux.vpn-control-until", value),
-  ));
   const stopping = useRef(false);
   const [disconnecting, setDisconnecting] = useState(false);
-  const [cooldownSeconds, setCooldownSeconds] = useState(() => Math.ceil(control.current.remaining(Date.now()) / 1000));
   const stateRef = useRef<ConnectionStatus>("idle");
-  useEffect(() => {
-    const timer = window.setInterval(() => setCooldownSeconds(Math.ceil(control.current.remaining(Date.now()) / 1000)), 200);
-    return () => window.clearInterval(timer);
-  }, []);
 	const trafficSnapshot = useRef<{ rxBytes: number; txBytes: number; at: number } | null>(null);
 
   const pushLog = useCallback((message: string, level: LogLevel, category: LogCategory, stage: string) => {
@@ -158,8 +148,7 @@ export function useVpn(_opts: { autoReconnect: boolean; timeoutSec: number }) {
   }, [pushLog, setStage, startStats, stopStats]);
 
   const connect = useCallback(() => {
-    if (stopping.current || !["idle", "error"].includes(stateRef.current) || !control.current.claim(Date.now())) return;
-    setCooldownSeconds(5);
+    if (stopping.current || !["idle", "error"].includes(stateRef.current)) return;
     stateRef.current = "connecting";
     const native = (window as unknown as { PaperFluxNative?: { connect?: () => void } }).PaperFluxNative;
     stopStats(); setStatus("connecting"); setErrorReason(null); setVerification(null); setStages(freshStages());
@@ -176,8 +165,8 @@ export function useVpn(_opts: { autoReconnect: boolean; timeoutSec: number }) {
     }
   }, [pushLog, stopStats]);
   const disconnect = useCallback(() => {
-    if (stopping.current || ["idle", "error"].includes(stateRef.current) || !control.current.claim(Date.now())) return;
-    stopping.current = true; setDisconnecting(true); setCooldownSeconds(5);
+    if (stopping.current || ["idle", "error"].includes(stateRef.current)) return;
+    stopping.current = true; setDisconnecting(true);
     // The VPN interface lives in a separate Android process.  Keep the last
     // confirmed state until that process closes the TUN and broadcasts
     // DISCONNECTED; optimistic "off" was the source of a misleading UI
@@ -198,5 +187,5 @@ export function useVpn(_opts: { autoReconnect: boolean; timeoutSec: number }) {
     (window as unknown as { PaperFluxNative?: { openVerification?: () => void } }).PaperFluxNative?.openVerification?.();
   }, []);
   return { status, stages, logs, errorReason, authRequired: verification !== null, verification, openVerification, stats, connect, disconnect, retry, clearLogs, pushLog,
-    cooldownSeconds, disconnecting, controlDisabled: cooldownSeconds > 0 || disconnecting };
+    disconnecting, controlDisabled: disconnecting };
 }
