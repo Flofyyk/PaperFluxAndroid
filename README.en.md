@@ -18,7 +18,7 @@
 
 PaperFlux Android connects applications to a PaperFlux server through an encrypted document transport. A configured server and an access profile are required.
 
-The [0.4.30 release](https://github.com/Flofyyk/PaperFluxAndroid/releases/tag/v0.4.30) fixes DNS fallback, Yandex verification waiting and queue progression, and silent Mail.ru connection recovery. DNS/TCP failure details are available in the journal. It includes core `0.5.17`; local SOCKS5 mode and VPN app inclusion lists are retained.
+The [0.4.31 release](https://github.com/Flofyyk/PaperFluxAndroid/releases/tag/v0.4.31) handles Mail.ru browser verification and saves its result. The journal explains retry delays when requests are rate-limited. It includes core `0.5.18`; DNS fallback, Yandex verification queue fixes, Mail.ru recovery, local SOCKS5 mode, and VPN app inclusion lists are retained.
 
 Use a dedicated empty document for Mail.ru: editable links receive periodic editor changes. Read-only links are accepted without those changes; connectivity still depends on the document service.
 

@@ -1,15 +1,15 @@
-# Native core for Android 0.4.30
+# Native core for Android 0.4.31
 
-Bundled version: `0.5.17`.
+Bundled version: `0.5.18`.
 
-Source: [PaperFlux commit 2cad723166c9ed087e417c9c26685284c3b76a72](https://github.com/Flofyyk/PaperFlux/tree/2cad723166c9ed087e417c9c26685284c3b76a72).
+Source: [PaperFlux commit 2db20a8becd9bfa1fd3acc739453ab43d6511f83](https://github.com/Flofyyk/PaperFlux/tree/2db20a8becd9bfa1fd3acc739453ab43d6511f83).
 
-The Session protocol is unchanged. Updating both ends is recommended so the Mail.ru read watchdog also runs on the server.
+The Session protocol is unchanged. Updating both ends is recommended so Mail.ru browser verification and the read watchdog also run on the server.
 
 Build all four Android ABI binaries from that source using Go 1.26.4+ and Android NDK 27.0.12077973+:
 
 ```powershell
-.\scripts\build-android-native.ps1 -NdkPath '<NDK path>' -AndroidProject '<Android checkout>' -Version '0.5.17'
+.\scripts\build-android-native.ps1 -NdkPath '<NDK path>' -AndroidProject '<Android checkout>' -Version '0.5.18'
 ```
 
 Then build the Android release with JDK 17+ and SDK 35:
